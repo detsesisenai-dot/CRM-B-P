@@ -1,0 +1,635 @@
+import React, { useState, useMemo } from 'react';
+import { 
+  Upload, Search, MapPin, User, Mail, Phone, 
+  Download, BarChart2, Briefcase, Filter,
+  LayoutGrid, List, Info, CheckSquare, Square, 
+  ArrowRightCircle, CheckCircle2, Zap,
+  Building, Target, ThermometerSun, XCircle
+} from 'lucide-react';
+
+// --- Constantes e Configurações ---
+const CONSULTORIAS = [
+  'ALI', 
+  'MANUFATURA ENXUTA', 
+  'EFICIÊNCIA ENERGÉTICA', 
+  'TRANSFORMAÇÃO DIGITAL'
+];
+
+const STATUS_CRM = [
+  'Não Contactado',
+  'Em Contato',
+  'Apresentação/Mesa',
+  'Negociação',
+  'Proposta Emitida',
+  'Contrato Fechado',
+  'Perdido'
+];
+
+const TERMOMETRO_CORES = {
+  0: { label: 'Frio', color: 'text-slate-500', bg: 'bg-slate-100', icon: '❄️', desc: 'Nenhum interesse mapeado' },
+  1: { label: 'Morno', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: '🌤️', desc: 'Interesse em 1 consultoria' },
+  2: { label: 'Quente', color: 'text-orange-500', bg: 'bg-orange-100', icon: '🔥', desc: 'Interesse em 2 consultorias' },
+  3: { label: 'Muito Quente', color: 'text-red-500', bg: 'bg-red-100', icon: '🌋', desc: 'Interesse em 3 consultorias' },
+  4: { label: 'Estrela', color: 'text-purple-600', bg: 'bg-purple-100', icon: '⭐', desc: 'Interesse em todas as 4!' }
+};
+
+const FUNNEL_COLORS = {
+  'Não Contactado': { bg: 'bg-slate-200', text: 'text-slate-700', hover: 'hover:bg-slate-300' },
+  'Em Contato': { bg: 'bg-blue-200', text: 'text-blue-800', hover: 'hover:bg-blue-300' },
+  'Apresentação/Mesa': { bg: 'bg-yellow-200', text: 'text-yellow-800', hover: 'hover:bg-yellow-300' },
+  'Negociação': { bg: 'bg-orange-200', text: 'text-orange-800', hover: 'hover:bg-orange-300' },
+  'Proposta Emitida': { bg: 'bg-purple-200', text: 'text-purple-800', hover: 'hover:bg-purple-300' },
+  'Contrato Fechado': { bg: 'bg-green-300', text: 'text-green-900', hover: 'hover:bg-green-400' },
+  'Perdido': { bg: 'bg-red-200', text: 'text-red-800', hover: 'hover:bg-red-300' }
+};
+
+export default function App() {
+  const [data, setData] = useState([]);
+  const [crmState, setCrmState] = useState({});
+  const [viewMode, setViewMode] = useState('table');
+  
+  // Estados de Filtro
+  const [filterCidade, setFilterCidade] = useState('');
+  const [filterPorte, setFilterPorte] = useState('');
+  const [filterInteresseMinimo, setFilterInteresseMinimo] = useState(0);
+  const [filterStatus, setFilterStatus] = useState('Todos');
+
+  // Estados de Seleção em Massa
+  const [selectedLeads, setSelectedLeads] = useState([]);
+  const [bulkStatus, setBulkStatus] = useState('');
+
+  // --- Processamento de CSV ---
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text.split('\n');
+      const headers = lines[0].split(';').map(h => h.trim().replace(/\r/g, ''));
+      
+      const parsedData = [];
+      for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const values = lines[i].split(';');
+        const obj = {};
+        headers.forEach((h, index) => {
+          obj[h] = values[index] ? values[index].trim().replace(/\r/g, '') : '';
+        });
+        parsedData.push(obj);
+      }
+      processData(parsedData);
+    };
+    reader.readAsText(file, 'UTF-8');
+  };
+
+  const processData = (rawData) => {
+    let processed = rawData.filter(d => 
+      d['NÚMERO DE FUNCIONÁRIOS'] && d['NÚMERO DE FUNCIONÁRIOS'] !== 'Até 04 colaboradores'
+    );
+
+    processed = processed.map((empresa, idx) => {
+      let score = 0;
+      let interesses = [];
+      CONSULTORIAS.forEach(cons => {
+        if (empresa[cons] === 'Sim') {
+          score += 1;
+          interesses.push(cons);
+        }
+      });
+      return {
+        ...empresa,
+        score,
+        interesses,
+        // Garante que a chave seja sempre única
+        cnpj_key: empresa['CNPJ'] ? `${empresa['CNPJ']}-${idx}` : `fallback-id-${idx}`
+      };
+    });
+
+    processed.sort((a, b) => b.score - a.score);
+    setData(processed);
+  };
+
+  // --- Ações de CRM ---
+  const getCrmData = (cnpj) => crmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
+
+  const updateCrm = (cnpj, field, value) => {
+    setCrmState(prev => ({
+      ...prev,
+      [cnpj]: { ...getCrmData(cnpj), [field]: value }
+    }));
+  };
+
+  // --- Ações em Massa (Bulk) ---
+  const toggleSelection = (cnpj) => {
+    setSelectedLeads(prev => 
+      prev.includes(cnpj) ? prev.filter(id => id !== cnpj) : [...prev, cnpj]
+    );
+  };
+
+  const toggleAll = () => {
+    if (selectedLeads.length === filteredData.length) {
+      setSelectedLeads([]);
+    } else {
+      setSelectedLeads(filteredData.map(d => d.cnpj_key));
+    }
+  };
+
+  const applyBulkAction = () => {
+    if (!bulkStatus || selectedLeads.length === 0) return;
+    
+    const newCrmState = { ...crmState };
+    selectedLeads.forEach(cnpj => {
+      newCrmState[cnpj] = { ...getCrmData(cnpj), status: bulkStatus };
+    });
+    
+    setCrmState(newCrmState);
+    setSelectedLeads([]); 
+    setBulkStatus('');
+  };
+
+  // --- Filtros Dinâmicos ---
+  const filteredData = useMemo(() => {
+    return data.filter(emp => {
+      const crm = getCrmData(emp.cnpj_key);
+      const matchCidade = filterCidade ? emp['CIDADE'] === filterCidade : true;
+      const matchPorte = filterPorte ? emp['PORTE'] === filterPorte : true;
+      const matchInteresse = emp.score >= filterInteresseMinimo;
+      const matchStatus = filterStatus !== 'Todos' ? crm.status === filterStatus : true;
+      return matchCidade && matchPorte && matchInteresse && matchStatus;
+    });
+  }, [data, crmState, filterCidade, filterPorte, filterInteresseMinimo, filterStatus]);
+
+  // Checa se há algum filtro ativo para exibir o botão de Limpar Filtros
+  const isFilterActive = filterCidade !== '' || filterPorte !== '' || filterInteresseMinimo > 0 || filterStatus !== 'Todos';
+
+  const resetFilters = () => {
+    setFilterCidade('');
+    setFilterPorte('');
+    setFilterInteresseMinimo(0);
+    setFilterStatus('Todos');
+  };
+
+  // --- Listas Únicas para Filtros ---
+  const cidadesUnicas = [...new Set(data.map(d => d['CIDADE']).filter(Boolean))].sort();
+  const portesUnicos = [...new Set(data.map(d => d['PORTE']).filter(Boolean))].sort();
+
+  // --- Dados para o Funil ---
+  const funnelData = useMemo(() => {
+    const counts = STATUS_CRM.reduce((acc, status) => { acc[status] = 0; return acc; }, {});
+    data.forEach(emp => { counts[getCrmData(emp.cnpj_key).status]++; });
+    return STATUS_CRM.map(status => ({ name: status, Quantidade: counts[status] }));
+  }, [data, crmState]);
+
+  const maxFunnelValue = Math.max(...funnelData.map(d => d.Quantidade), 1);
+
+  // --- Exportar Planilha ---
+  const exportCrm = () => {
+    const headers = ['CNPJ', 'Razão Social', 'Contato', 'E-mail', 'Telefone', 'Termômetro de Indicação', 'Status da Negociação', 'Consultoria Foco'];
+    const rows = filteredData.map(emp => {
+      const crm = getCrmData(emp.cnpj_key);
+      const scoreLabel = TERMOMETRO_CORES[emp.score]?.label || 'Frio';
+      return [
+        emp['CNPJ'], emp['RAZÃO SOCIAL'], emp['NOME'], emp['E-MAIL'], emp['TELEFONE'],
+        `${emp.score} - ${scoreLabel}`, crm.status, crm.consultoria || 'Nenhuma'
+      ].map(v => `"${v || ''}"`).join(';');
+    });
+
+    const csvContent = [headers.join(';'), ...rows].join('\n');
+    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `Leads_Filtrados_CRM.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // --- Tela de Upload ---
+  if (data.length === 0) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className="bg-white p-10 rounded-2xl shadow-xl max-w-2xl w-full text-center border border-slate-100">
+          <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
+            <Zap size={40} />
+          </div>
+          <h1 className="text-3xl font-extrabold text-slate-800 mb-3">CRM de Inteligência Artificial</h1>
+          <p className="text-slate-600 mb-8 text-lg">
+            Transforme sua base de dados em um mapa de oportunidades claro e acionável.
+          </p>
+          
+          <div className="bg-blue-50/50 p-6 rounded-xl text-left mb-8 border border-blue-100">
+            <h3 className="font-bold text-blue-800 mb-3 flex items-center"><Info size={18} className="mr-2"/> Como funciona a inteligência:</h3>
+            <ul className="space-y-2 text-sm text-slate-700">
+              <li className="flex items-start"><CheckCircle2 size={16} className="text-blue-500 mr-2 mt-0.5 shrink-0"/> <b>Limpeza automática:</b> Empresas muito pequenas (até 4 pessoas) são ocultadas para focar no seu ICP (Ideal Customer Profile).</li>
+              <li className="flex items-start"><CheckCircle2 size={16} className="text-blue-500 mr-2 mt-0.5 shrink-0"/> <b>Scoring de Leads:</b> Analisamos o interesse nas 4 mesas de consultoria e geramos uma temperatura (Frio a Estrela).</li>
+              <li className="flex items-start"><CheckCircle2 size={16} className="text-blue-500 mr-2 mt-0.5 shrink-0"/> <b>Gestão Visual:</b> Um funil interativo ajuda você a empurrar os leads de "Não Contactado" até o "Contrato Fechado".</li>
+            </ul>
+          </div>
+
+          <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-xl inline-flex items-center transition-all hover:shadow-lg hover:-translate-y-1">
+            <Upload className="mr-3" size={24} />
+            Subir Planilha Base (CSV)
+            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+          </label>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20">
+      {/* HEADER CORES */}
+      <header className="bg-slate-900 text-white px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4">
+        <div className="flex items-center space-x-3">
+          <Briefcase className="text-blue-400" size={28} />
+          <div>
+            <h1 className="text-xl font-bold leading-tight">CRM Inteligência de Mercado</h1>
+            <p className="text-xs text-slate-400">Gestão ativa de oportunidades</p>
+          </div>
+        </div>
+        <button 
+          onClick={exportCrm}
+          className="bg-green-500 hover:bg-green-400 text-slate-900 px-5 py-2.5 rounded-lg flex items-center text-sm font-bold transition-all shadow-md hover:shadow-lg"
+        >
+          <Download size={18} className="mr-2" />
+          Exportar Planilha Filtrada ({filteredData.length})
+        </button>
+      </header>
+
+      <main className="p-6 max-w-7xl mx-auto space-y-6">
+        
+        {/* INSTRUÇÕES E LEGENDAS */}
+        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between">
+          <div className="flex-1">
+            <h2 className="text-blue-800 font-bold flex items-center text-sm mb-1">
+              <Info size={16} className="mr-1.5"/> Dica de Uso
+            </h2>
+            <p className="text-xs text-slate-600">
+              Utilize o funil abaixo de forma interativa: clique em qualquer barra colorida para filtrar a tabela automaticamente. Selecione múltiplas empresas na lista para avançar o status de várias de uma só vez.
+            </p>
+          </div>
+          
+          <div className="hidden lg:block w-px h-10 bg-blue-200 mx-4"></div>
+          
+          <div className="flex-1 flex flex-col">
+            <span className="text-xs font-semibold text-slate-500 mb-1">Entenda o Termômetro:</span>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(TERMOMETRO_CORES).map(([score, config]) => (
+                <div key={score} className={`px-2 py-1 rounded text-[10px] font-bold ${config.bg} ${config.color} border border-white flex items-center`} title={config.desc}>
+                  {config.icon} {config.label}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* FUNIL DINÂMICO E INTERATIVO (CUSTOMIZADO) */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+          <h2 className="text-lg font-bold flex items-center mb-6 text-slate-700">
+            <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline de Conversão
+            <span className="ml-2 text-xs font-normal text-slate-400 bg-slate-100 px-2 py-1 rounded-full">Clique nas etapas para filtrar</span>
+          </h2>
+          
+          <div className="flex flex-col space-y-3">
+            {funnelData.map((stage) => {
+              const config = FUNNEL_COLORS[stage.name];
+              const widthPercent = Math.max(20, (stage.Quantidade / maxFunnelValue) * 100);
+              const isActiveFilter = filterStatus === stage.name;
+              
+              return (
+                <div 
+                  key={stage.name} 
+                  onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)}
+                  className="flex flex-col items-center group cursor-pointer relative"
+                >
+                  <div 
+                    style={{ width: `${widthPercent}%` }}
+                    className={`
+                      relative h-10 rounded-lg flex items-center justify-between px-4 transition-all duration-500 ease-out
+                      ${config.bg} ${config.text} ${config.hover}
+                      ${isActiveFilter ? 'ring-4 ring-blue-300 ring-offset-2 scale-[1.02]' : 'hover:scale-[1.01]'}
+                    `}
+                  >
+                    <span className="font-semibold text-sm truncate pr-2">{stage.name}</span>
+                    <span className="font-black text-lg">{stage.Quantidade}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* CONTROLE DE FILTROS REFORMULADO (MAIS DIDÁTICO E DINÂMICO) */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+          
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-slate-100 pb-4">
+            <div>
+              <h3 className="font-bold text-slate-800 text-lg flex items-center">
+                <Filter size={20} className="text-blue-500 mr-2" /> 
+                Refine sua Busca
+              </h3>
+              <p className="text-xs text-slate-500 mt-1">Utilize os campos abaixo para segmentar os leads ideais para a sua ação.</p>
+            </div>
+            
+            {isFilterActive && (
+              <button 
+                onClick={resetFilters} 
+                className="mt-3 sm:mt-0 text-sm flex items-center text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg font-semibold transition-colors"
+              >
+                <XCircle size={16} className="mr-1.5" /> Limpar Filtros
+              </button>
+            )}
+          </div>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+            
+            {/* Filtro Cidade */}
+            <div className="flex flex-col">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-0.5">
+                <MapPin size={16} className="mr-1.5 text-slate-400"/> Localidade
+              </label>
+              <p className="text-[11px] text-slate-400 mb-2">Foque em regiões específicas</p>
+              <select 
+                className={`w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none ${filterCidade ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-slate-50'}`} 
+                value={filterCidade} 
+                onChange={(e) => setFilterCidade(e.target.value)}
+              >
+                <option value="">Todas as Cidades</option>
+                {cidadesUnicas.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+
+            {/* Filtro Porte */}
+            <div className="flex flex-col">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-0.5">
+                <Building size={16} className="mr-1.5 text-slate-400"/> Porte da Empresa
+              </label>
+              <p className="text-[11px] text-slate-400 mb-2">Segmente por tamanho</p>
+              <select 
+                className={`w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none ${filterPorte ? 'border-blue-300 bg-blue-50' : 'border-slate-200 bg-slate-50'}`}
+                value={filterPorte} 
+                onChange={(e) => setFilterPorte(e.target.value)}
+              >
+                <option value="">Todos os Portes</option>
+                {portesUnicos.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+
+            {/* Filtro Status Funil */}
+            <div className="flex flex-col">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-0.5">
+                <Target size={16} className="mr-1.5 text-slate-400"/> Etapa do Funil
+              </label>
+              <p className="text-[11px] text-slate-400 mb-2">Busque pelo status de negociação</p>
+              <select 
+                className={`w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none font-semibold ${filterStatus !== 'Todos' ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 bg-slate-50 text-slate-700'}`}
+                value={filterStatus} 
+                onChange={(e) => setFilterStatus(e.target.value)}
+              >
+                <option value="Todos">Visualizando Todos</option>
+                {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Filtro Dinâmico de Termômetro (Visual Bottons) */}
+          <div className="flex flex-col border-t border-slate-100 pt-5">
+            <label className="text-sm font-bold text-slate-700 flex items-center mb-1">
+              <ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Nível de Interesse Mínimo (Termômetro)
+            </label>
+            <p className="text-[12px] text-slate-500 mb-4">
+              Clique em um botão abaixo para definir o interesse mínimo desejado. 
+              <br className="hidden sm:block"/>Ex: Ao clicar em <b>"Quente"</b>, você verá empresas <i>Quentes</i>, <i>Muito Quentes</i> e <i>Estrelas</i>.
+            </p>
+            
+            <div className="flex flex-wrap sm:flex-nowrap gap-2">
+              {Object.entries(TERMOMETRO_CORES).map(([score, config]) => {
+                const numericScore = Number(score);
+                const isActive = filterInteresseMinimo === numericScore; // É exatamente o clicado
+                const isIncluded = numericScore >= filterInteresseMinimo; // Está dentro da régua atual
+                
+                return (
+                  <button 
+                    key={score}
+                    onClick={() => setFilterInteresseMinimo(numericScore)}
+                    className={`flex-1 py-3 px-2 sm:px-4 rounded-xl border text-sm transition-all flex flex-col items-center justify-center gap-1.5
+                      ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 scale-105 z-10' : 
+                        isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50 hover:border-blue-200' : 'border-slate-100 bg-slate-50/50 opacity-60 grayscale hover:grayscale-0'
+                      }
+                    `}
+                    title={config.desc}
+                  >
+                    <span className="text-2xl drop-shadow-sm">{config.icon}</span>
+                    <span className={`font-bold text-center leading-tight ${isIncluded ? config.color : 'text-slate-400'}`}>
+                      {config.label} {numericScore > 0 && !isActive ? '+' : ''}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+
+        {/* ÁREA DE AÇÃO EM MASSA (BULK BAR) */}
+        {selectedLeads.length > 0 && (
+          <div className="bg-indigo-600 text-white p-4 rounded-xl shadow-lg flex flex-col sm:flex-row items-center justify-between animate-in fade-in slide-in-from-bottom-4 sticky top-24 z-40 border border-indigo-400">
+            <div className="flex items-center mb-3 sm:mb-0">
+              <CheckSquare size={20} className="mr-2 text-indigo-200" />
+              <span className="font-bold">{selectedLeads.length} empresas selecionadas</span>
+              <span className="hidden sm:inline text-indigo-200 text-sm ml-2">- Pronto para mover no funil</span>
+            </div>
+            <div className="flex items-center w-full sm:w-auto space-x-3">
+              <select 
+                className="flex-1 sm:w-48 border-none rounded-lg p-2 text-sm text-slate-800 font-medium shadow-inner focus:ring-2 focus:ring-white outline-none"
+                value={bulkStatus}
+                onChange={(e) => setBulkStatus(e.target.value)}
+              >
+                <option value="">-- Mudar status para --</option>
+                {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+              <button 
+                onClick={applyBulkAction}
+                disabled={!bulkStatus}
+                className="bg-white text-indigo-600 px-4 py-2 rounded-lg font-bold text-sm hover:bg-indigo-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center"
+              >
+                Aplicar <ArrowRightCircle size={16} className="ml-1"/>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* LISTAGEM DE DADOS */}
+        <div>
+          <div className="flex flex-col sm:flex-row justify-between items-center mb-4 gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-slate-800 flex items-center">
+                Oportunidades em Tela 
+                <span className="ml-2 bg-slate-200 text-slate-700 text-sm px-2 py-0.5 rounded-full">{filteredData.length} leads</span>
+              </h2>
+            </div>
+            
+            <div className="flex bg-slate-200 rounded-lg p-1">
+              <button onClick={() => setViewMode('table')} className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-300'}`}>
+                <List size={16} className="mr-2" /> Planilha
+              </button>
+              <button onClick={() => setViewMode('cards')} className={`flex items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:bg-slate-300'}`}>
+                <LayoutGrid size={16} className="mr-2" /> Cards
+              </button>
+            </div>
+          </div>
+          
+          {/* TABELA */}
+          {viewMode === 'table' && (
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+              <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap">
+                <thead className="text-xs text-slate-700 uppercase bg-slate-100 border-b border-slate-200">
+                  <tr>
+                    <th className="px-4 py-4 w-10 text-center">
+                      <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors focus:outline-none">
+                        {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                      </button>
+                    </th>
+                    <th className="px-4 py-3">Termômetro</th>
+                    <th className="px-4 py-3">Empresa</th>
+                    <th className="px-4 py-3">Contato</th>
+                    <th className="px-4 py-3">Status CRM</th>
+                    <th className="px-4 py-3">Consultoria Foco</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredData.map((emp) => {
+                    const crm = getCrmData(emp.cnpj_key);
+                    const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
+                    const isSelected = selectedLeads.includes(emp.cnpj_key);
+                    const rowClass = isSelected ? 'bg-indigo-50 border-b border-indigo-100' : 'border-b border-slate-100 hover:bg-slate-50';
+
+                    return (
+                      <tr key={emp.cnpj_key} className={`${rowClass} transition-colors`}>
+                        <td className="px-4 py-3 text-center">
+                          <button onClick={() => toggleSelection(emp.cnpj_key)} className={`${isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'} transition-colors focus:outline-none`}>
+                            {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${scoreData.bg} ${scoreData.color}`} title={scoreData.desc}>
+                            <span className="mr-1.5">{scoreData.icon}</span> {emp.score}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-bold text-slate-800" title={emp['RAZÃO SOCIAL']}>
+                            {emp['RAZÃO SOCIAL']?.substring(0, 35)}{emp['RAZÃO SOCIAL']?.length > 35 ? '...' : ''}
+                          </div>
+                          <div className="text-xs text-slate-400 font-mono mt-0.5">{emp['CNPJ']} | {emp['CIDADE']}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="font-medium text-slate-700">{emp['NOME']}</div>
+                          <div className="text-xs text-slate-500">{emp['TELEFONE']}</div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <select 
+                            className="border-slate-200 rounded-lg p-1.5 text-xs font-semibold bg-white focus:ring-blue-500 focus:border-blue-500 shadow-sm outline-none w-full"
+                            value={crm.status}
+                            onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}
+                          >
+                            {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        </td>
+                        <td className="px-4 py-3">
+                          <select 
+                            className="border-slate-200 rounded-lg p-1.5 text-xs bg-white focus:ring-blue-500 focus:border-blue-500 shadow-sm outline-none w-full"
+                            value={crm.consultoria}
+                            onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)}
+                            disabled={crm.status === 'Não Contactado'}
+                          >
+                            <option value="">-- Travar Produto --</option>
+                            {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredData.length === 0 && (
+                    <tr><td colSpan="6" className="px-4 py-16 text-center text-slate-500">
+                      <Search size={32} className="mx-auto text-slate-300 mb-3" />
+                      <p className="text-base font-semibold">Nenhum lead atende a esses filtros.</p>
+                      <button onClick={resetFilters} className="text-blue-500 hover:underline mt-2 text-sm">Limpar todos os filtros</button>
+                    </td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* CARDS */}
+          {viewMode === 'cards' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              {filteredData.map((emp) => {
+                const crm = getCrmData(emp.cnpj_key);
+                const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
+                const isSelected = selectedLeads.includes(emp.cnpj_key);
+
+                return (
+                  <div key={emp.cnpj_key} className={`bg-white rounded-xl shadow-sm border ${isSelected ? 'border-indigo-400 ring-1 ring-indigo-400' : 'border-slate-200'} overflow-hidden flex flex-col hover:shadow-md transition-shadow relative`}>
+                    
+                    {/* Botão de seleção no card */}
+                    <button 
+                      onClick={() => toggleSelection(emp.cnpj_key)}
+                      className={`absolute top-3 left-3 z-10 p-1 bg-white rounded-md shadow-sm ${isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}`}
+                    >
+                      {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                    </button>
+
+                    <div className={`p-4 pl-12 border-b border-slate-100 flex justify-between items-start ${scoreData.bg}`}>
+                      <div className="flex-1 pr-2">
+                        <h3 className="font-bold text-slate-800 leading-tight mb-1 truncate" title={emp['RAZÃO SOCIAL']}>{emp['RAZÃO SOCIAL']}</h3>
+                        <p className="text-xs text-slate-600 font-mono">{emp['CNPJ']}</p>
+                      </div>
+                      <div className="flex flex-col items-end shrink-0">
+                        <div className={`flex items-center px-2 py-1 rounded-lg bg-white/60 text-xs font-bold ${scoreData.color}`} title={scoreData.desc}>
+                          <span className="mr-1">{scoreData.icon}</span> {scoreData.label}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 space-y-3 flex-1 text-sm text-slate-600">
+                      <div className="flex items-start"><User size={16} className="mr-2 text-slate-400 shrink-0 mt-0.5" /><div><p className="font-medium text-slate-800">{emp['NOME'] || 'N/D'}</p></div></div>
+                      <div className="flex items-center"><Phone size={16} className="mr-2 text-slate-400 shrink-0" /><p>{emp['TELEFONE'] || 'N/D'}</p></div>
+                      <div className="flex items-center"><MapPin size={16} className="mr-2 text-slate-400 shrink-0" /><p>{emp['CIDADE']} - {emp['UF']}</p></div>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-3">
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Status Funil</label>
+                        <select className="w-full border-slate-300 rounded p-1.5 text-sm font-medium bg-white outline-none focus:ring-blue-500" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
+                          {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-semibold text-slate-500 mb-1">Consultoria de Foco</label>
+                        <select className="w-full border-slate-300 rounded p-1.5 text-sm bg-white outline-none focus:ring-blue-500" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
+                          <option value="">-- Selecione o Produto --</option>
+                          {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {filteredData.length === 0 && (
+                <div className="col-span-full py-16 text-center text-slate-500 bg-white rounded-xl shadow-sm border border-slate-200">
+                  <Search size={32} className="mx-auto text-slate-300 mb-3" />
+                  <p className="text-base font-semibold">Nenhum lead atende a esses filtros.</p>
+                  <button onClick={resetFilters} className="text-blue-500 hover:underline mt-2 text-sm">Limpar todos os filtros</button>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
