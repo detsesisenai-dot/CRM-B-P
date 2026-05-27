@@ -25,6 +25,7 @@ const STATUS_CRM = [
   'Perdido'
 ];
 
+// O Tailwind precisa ler as strings completas para gerar o CSS no GitHub Pages
 const TERMOMETRO_CORES = {
   0: { label: 'Frio', color: 'text-slate-500', bg: 'bg-slate-100', icon: '❄️', desc: 'Nenhum interesse mapeado' },
   0.5: { label: 'Potencial', color: 'text-emerald-600', bg: 'bg-emerald-100', icon: '🎯', desc: 'Sósia: Mesmo Setor, Porte e Local' },
@@ -60,7 +61,7 @@ export default function App() {
   const [selectedLeads, setSelectedLeads] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('');
 
-  // --- Decodificador Tolerante ---
+  // --- Decodificador Tolerante a Acentos Brasileiros ---
   const decodeBuffer = (buffer) => {
     try {
       let decoderUtf8 = new TextDecoder('utf-8');
@@ -121,6 +122,7 @@ export default function App() {
     return parsedData;
   };
 
+  // Tenta puxar a base de dados do GitHub Pages (pasta /public)
   useEffect(() => {
     try {
       const localData = localStorage.getItem('crm_data');
@@ -134,10 +136,10 @@ export default function App() {
       }
     } catch (e) { console.error("Erro no cache", e); }
 
-    // Path relativo explícito para GitHub Pages
-    fetch('./data.csv')
+    // Rota relativa simples garante que funcione em subdiretórios no GH Pages
+    fetch('data.csv')
       .then(response => {
-        if (!response.ok) throw new Error('data.csv ausente');
+        if (!response.ok) throw new Error('data.csv não encontrado');
         return response.arrayBuffer();
       })
       .then(buffer => {
@@ -146,7 +148,7 @@ export default function App() {
         processData(parsedData);
       })
       .catch(err => {
-        console.log('Nenhuma base remota. Acesso manual iniciado.', err);
+        console.log('Sem base vinculada. Requer upload manual.', err);
         setIsLoading(false);
       });
   }, []);
@@ -161,7 +163,7 @@ export default function App() {
   }, [data, crmState]);
 
   const clearLocalData = () => {
-    if(window.confirm("Isso apagará o seu progresso local e solicitará uma nova planilha. Tem certeza?")) {
+    if(window.confirm("Atenção: Isso apagará o progresso salvo neste navegador. Deseja continuar?")) {
       localStorage.removeItem('crm_data');
       localStorage.removeItem('crm_state');
       setData([]);
@@ -185,7 +187,7 @@ export default function App() {
         processData(parsedData);
       } catch (err) {
         console.error("Erro na leitura do arquivo:", err);
-        setErrorMsg("Ocorreu um erro ao processar a planilha. Verifique a formatação do arquivo CSV.");
+        setErrorMsg("Formato de CSV inválido. Tente salvar a planilha novamente pelo Excel como 'CSV (UTF-8)'.");
       } finally {
         setIsLoading(false);
         e.target.value = null; 
@@ -196,7 +198,7 @@ export default function App() {
 
   const processData = (rawData) => {
     if (!rawData || rawData.length === 0) {
-      setErrorMsg("A planilha parece estar vazia ou não pôde ser lida.");
+      setErrorMsg("A planilha está vazia ou não possui o formato correto.");
       return;
     }
 
@@ -221,7 +223,7 @@ export default function App() {
     }
 
     if (processed.length === 0) {
-      setErrorMsg("Nenhuma empresa atendeu aos critérios iniciais (todas filtradas por porte).");
+      setErrorMsg("Todas as empresas foram filtradas (ex: Nenhuma empresa acima de 5 colaboradores encontrada).");
       return;
     }
 
@@ -400,6 +402,7 @@ export default function App() {
   
   const exportFullDatabase = () => generateCSV(data, 'data.csv');
 
+  // --- Telas de Carregamento e Vazio ---
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
@@ -426,7 +429,7 @@ export default function App() {
             </div>
           ) : (
             <p className="text-slate-600 mb-8 text-base md:text-lg">
-              A base de dados não foi encontrada no servidor. Para iniciar, selecione a planilha que deseja vincular.
+              A base de dados não foi encontrada no servidor. Para iniciar, selecione a planilha que deseja vincular. Certifique-se de que o arquivo <code>data.csv</code> esteja na pasta <code>public</code> do seu projeto no GitHub.
             </p>
           )}
 
