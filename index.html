@@ -1,784 +1,839 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  Upload, Search, MapPin, User, Mail, Phone, 
-  Download, BarChart2, Briefcase, Filter,
-  LayoutGrid, List, Info, CheckSquare, Square, 
-  ArrowRightCircle, Target, ThermometerSun, 
-  XCircle, Save, Lightbulb, Trash2, Zap, Building
-} from 'lucide-react';
-
-// --- Constantes e Configurações ---
-const CONSULTORIAS = [
-  'ALI', 
-  'MANUFATURA ENXUTA', 
-  'EFICIÊNCIA ENERGÉTICA', 
-  'TRANSFORMAÇÃO DIGITAL'
-];
-
-const STATUS_CRM = [
-  'Não Contactado',
-  'Em Contato',
-  'Apresentação/Mesa',
-  'Negociação',
-  'Proposta Emitida',
-  'Contrato Fechado',
-  'Perdido'
-];
-
-// O Tailwind precisa ler as strings completas para gerar o CSS no GitHub Pages
-const TERMOMETRO_CORES = {
-  0: { label: 'Frio', color: 'text-slate-500', bg: 'bg-slate-100', icon: '❄️', desc: 'Nenhum interesse mapeado' },
-  0.5: { label: 'Potencial', color: 'text-emerald-600', bg: 'bg-emerald-100', icon: '🎯', desc: 'Sósia: Mesmo Setor, Porte e Local' },
-  1: { label: 'Morno', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: '🌤️', desc: 'Interesse em 1 consultoria' },
-  2: { label: 'Quente', color: 'text-orange-500', bg: 'bg-orange-100', icon: '🔥', desc: 'Interesse em 2 consultorias' },
-  3: { label: 'Muito Quente', color: 'text-red-500', bg: 'bg-red-100', icon: '🌋', desc: 'Interesse em 3 consultorias' },
-  4: { label: 'Estrela', color: 'text-purple-600', bg: 'bg-purple-100', icon: '⭐', desc: 'Interesse em todas as 4!' }
-};
-
-const FUNNEL_COLORS = {
-  'Não Contactado': { bg: 'bg-slate-200', text: 'text-slate-700', hover: 'hover:bg-slate-300' },
-  'Em Contato': { bg: 'bg-blue-200', text: 'text-blue-800', hover: 'hover:bg-blue-300' },
-  'Apresentação/Mesa': { bg: 'bg-yellow-200', text: 'text-yellow-800', hover: 'hover:bg-yellow-300' },
-  'Negociação': { bg: 'bg-orange-200', text: 'text-orange-800', hover: 'hover:bg-orange-300' },
-  'Proposta Emitida': { bg: 'bg-purple-200', text: 'text-purple-800', hover: 'hover:bg-purple-300' },
-  'Contrato Fechado': { bg: 'bg-green-300', text: 'text-green-900', hover: 'hover:bg-green-400' },
-  'Perdido': { bg: 'bg-red-200', text: 'text-red-800', hover: 'hover:bg-red-300' }
-};
-
-export default function App() {
-  const [data, setData] = useState([]);
-  const [crmState, setCrmState] = useState({});
-  const [viewMode, setViewMode] = useState('table');
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMsg, setErrorMsg] = useState('');
-  
-  const [filterCidade, setFilterCidade] = useState('');
-  const [filterPorte, setFilterPorte] = useState('');
-  const [filterInteresseMinimo, setFilterInteresseMinimo] = useState(0);
-  const [filterStatus, setFilterStatus] = useState('Todos');
-  const [filterInteresseEspecifico, setFilterInteresseEspecifico] = useState('Todos');
-
-  const [selectedLeads, setSelectedLeads] = useState([]);
-  const [bulkStatus, setBulkStatus] = useState('');
-
-  // --- Decodificador Tolerante a Acentos Brasileiros ---
-  const decodeBuffer = (buffer) => {
-    try {
-      let decoderUtf8 = new TextDecoder('utf-8');
-      let text = decoderUtf8.decode(buffer);
-      if (text.includes('')) {
-        let decoderWin = new TextDecoder('windows-1252');
-        text = decoderWin.decode(buffer);
-      }
-      return text;
-    } catch(e) {
-      console.error("Erro na decodificação", e);
-      return "";
-    }
-  };
-
-  // --- Parser CSV Seguro ---
-  const parseCSV = (text) => {
-    if (!text) return [];
-    const lines = text.split(/\r?\n/).filter(line => line && line.trim().length > 0);
-    if (lines.length === 0) return [];
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CRM Inteligência de Mercado</title>
     
-    const headerLine = lines[0];
-    const delimiter = (headerLine.match(/;/g) || []).length >= (headerLine.match(/,/g) || []).length ? ';' : ',';
-
-    const parseLine = (str) => {
-      const result = [];
-      let current = '';
-      let inQuotes = false;
-      for (let i = 0; i < str.length; i++) {
-        const char = str[i];
-        if (char === '"' && str[i + 1] === '"') {
-          current += '"'; i++;
-        } else if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === delimiter && !inQuotes) {
-          result.push(current.trim()); current = '';
-        } else {
-          current += char;
-        }
-      }
-      result.push(current.trim());
-      return result;
-    };
-
-    const headers = parseLine(lines[0]).map(h => h ? h.replace(/^"|"$/g, '').trim() : `col_${Math.random()}`);
-    const parsedData = [];
+    <!-- Tailwind CSS (Para manter todo o seu design e layout) -->
+    <script src="https://cdn.tailwindcss.com"></script>
     
-    for (let i = 1; i < lines.length; i++) {
-      const values = parseLine(lines[i]);
-      const obj = {};
-      headers.forEach((h, index) => {
-        let val = values[index] || '';
-        if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-        obj[h] = val.trim();
-      });
-      parsedData.push(obj);
-    }
-    return parsedData;
-  };
-
-  // Tenta puxar a base de dados do GitHub Pages (pasta /public)
-  useEffect(() => {
-    try {
-      const localData = localStorage.getItem('crm_data');
-      const localCrmState = localStorage.getItem('crm_state');
-
-      if (localData && localCrmState) {
-        setData(JSON.parse(localData));
-        setCrmState(JSON.parse(localCrmState));
-        setIsLoading(false);
-        return; 
-      }
-    } catch (e) { console.error("Erro no cache", e); }
-
-    // Rota relativa simples garante que funcione em subdiretórios no GH Pages
-    fetch('data.csv')
-      .then(response => {
-        if (!response.ok) throw new Error('data.csv não encontrado');
-        return response.arrayBuffer();
-      })
-      .then(buffer => {
-        const text = decodeBuffer(buffer).replace(/^\uFEFF/, '');
-        const parsedData = parseCSV(text);
-        processData(parsedData);
-      })
-      .catch(err => {
-        console.log('Sem base vinculada. Requer upload manual.', err);
-        setIsLoading(false);
-      });
-  }, []);
-
-  useEffect(() => {
-    if (data.length > 0) {
-      try {
-        localStorage.setItem('crm_data', JSON.stringify(data));
-        localStorage.setItem('crm_state', JSON.stringify(crmState));
-      } catch(e) { console.warn("Falha ao salvar no local storage", e) }
-    }
-  }, [data, crmState]);
-
-  const clearLocalData = () => {
-    if(window.confirm("Atenção: Isso apagará o progresso salvo neste navegador. Deseja continuar?")) {
-      localStorage.removeItem('crm_data');
-      localStorage.removeItem('crm_state');
-      setData([]);
-      setCrmState({});
-      setErrorMsg('');
-    }
-  };
-
-  const handleFileUpload = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setIsLoading(true);
-    setErrorMsg('');
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      try {
-        const buffer = event.target.result;
-        const text = decodeBuffer(buffer).replace(/^\uFEFF/, '');
-        const parsedData = parseCSV(text);
-        processData(parsedData);
-      } catch (err) {
-        console.error("Erro na leitura do arquivo:", err);
-        setErrorMsg("Formato de CSV inválido. Tente salvar a planilha novamente pelo Excel como 'CSV (UTF-8)'.");
-      } finally {
-        setIsLoading(false);
-        e.target.value = null; 
-      }
-    };
-    reader.readAsArrayBuffer(file);
-  };
-
-  const processData = (rawData) => {
-    if (!rawData || rawData.length === 0) {
-      setErrorMsg("A planilha está vazia ou não possui o formato correto.");
-      return;
-    }
-
-    const headers = Object.keys(rawData[0]);
-    const getCol = (keywords) => headers.find(h => keywords.some(k => h?.toString().toUpperCase().includes(k)));
+    <!-- FontAwesome (Substituindo a biblioteca antiga para garantir que os ícones nunca fiquem gigantes ou corrompidos) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
     
-    const numFuncCol = getCol(['FUNCIONÁRIO', 'FUNCIONARIO', 'COLABORADORES']);
-    const cnpjCol = getCol(['CNPJ']);
-    const razaoCol = getCol(['RAZÃO', 'RAZAO', 'EMPRESA']);
-    const cidadeCol = getCol(['CIDADE', 'MUNICÍPIO', 'MUNICIPIO']);
-    const setorCol = getCol(['SETOR', 'SEGMENTO']);
-    const porteCol = getCol(['PORTE', 'TAMANHO']);
-    const nomeCol = getCol(['NOME', 'CONTATO', 'RESPONSÁVEL']);
-    const telCol = getCol(['TELEFONE', 'CELULAR', 'WHATSAPP']);
-
-    let processed = rawData;
-    if (numFuncCol) {
-      processed = processed.filter(d => {
-        const val = d[numFuncCol]?.toString().toUpperCase() || '';
-        return val && !val.includes('ATÉ 04') && !val.includes('ATE 04');
-      });
-    }
-
-    if (processed.length === 0) {
-      setErrorMsg("Todas as empresas foram filtradas (ex: Nenhuma empresa acima de 5 colaboradores encontrada).");
-      return;
-    }
-
-    const profileStrength = {};
-    processed.forEach(empresa => {
-      let explicitScore = 0;
-      CONSULTORIAS.forEach(cons => { 
-        const col = headers.find(h => h?.toString().toUpperCase() === cons.toUpperCase());
-        if (col && empresa[col]?.toString().toUpperCase() === 'SIM') explicitScore += 1; 
-      });
-      empresa.explicitScore = explicitScore;
-
-      if (explicitScore > 0 && cidadeCol && porteCol && setorCol) {
-        const key = `${empresa[cidadeCol]}|${empresa[porteCol]}|${empresa[setorCol]}`;
-        profileStrength[key] = (profileStrength[key] || 0) + explicitScore;
-      }
-    });
-
-    const initialCrmState = {};
-
-    processed = processed.map((empresa, idx) => {
-      let score = empresa.explicitScore || 0;
-      let isLookalike = false;
-      let curadoriaReason = '';
-      let interesses = [];
-      
-      CONSULTORIAS.forEach(cons => { 
-        const col = headers.find(h => h?.toString().toUpperCase() === cons.toUpperCase());
-        if (col && empresa[col]?.toString().toUpperCase() === 'SIM') interesses.push(cons); 
-      });
-      
-      if (score === 0 && cidadeCol && porteCol && setorCol) {
-        const key = `${empresa[cidadeCol]}|${empresa[porteCol]}|${empresa[setorCol]}`;
-        const strength = profileStrength[key] || 0;
-        
-        if (strength >= 10) { score = 3; isLookalike = true; curadoriaReason = 'Alta conversão neste Perfil'; } 
-        else if (strength >= 5) { score = 2; isLookalike = true; curadoriaReason = 'Boa conversão neste Perfil'; } 
-        else if (strength >= 2) { score = 1; isLookalike = true; curadoriaReason = 'Alguma conversão neste Perfil'; } 
-        else if (strength === 1) { score = 0.5; isLookalike = true; curadoriaReason = 'Perfil Semelhante a leads'; }
-      }
-
-      const idCnpj = (cnpjCol && empresa[cnpjCol]) ? empresa[cnpjCol].toString() : '';
-      const cnpj_key = idCnpj ? `${idCnpj}-${idx}` : `fallback-id-${idx}`;
-      
-      const statusLido = headers.includes('Status da Negociação') ? empresa['Status da Negociação'] : 'Não Contactado';
-      const consultoriaLida = headers.includes('Consultoria Foco') ? empresa['Consultoria Foco'] : '';
-
-      initialCrmState[cnpj_key] = {
-        status: STATUS_CRM.includes(statusLido) ? statusLido : 'Não Contactado',
-        consultoria: CONSULTORIAS.includes(consultoriaLida) ? consultoriaLida : ''
-      };
-
-      return { 
-        ...empresa, 
-        score, interesses, isLookalike, curadoriaReason, cnpj_key,
-        _RAZAO_SOCIAL: (razaoCol && empresa[razaoCol]) ? empresa[razaoCol] : 'Empresa Indefinida',
-        _CNPJ: idCnpj || 'CNPJ N/D',
-        _CIDADE: (cidadeCol && empresa[cidadeCol]) ? empresa[cidadeCol] : '-',
-        _SETOR: (setorCol && empresa[setorCol]) ? empresa[setorCol] : '-',
-        _PORTE: (porteCol && empresa[porteCol]) ? empresa[porteCol] : '-',
-        _NOME: (nomeCol && empresa[nomeCol]) ? empresa[nomeCol] : '-',
-        _TELEFONE: (telCol && empresa[telCol]) ? empresa[telCol] : '-',
-        _FUNCIONARIOS: (numFuncCol && empresa[numFuncCol]) ? empresa[numFuncCol] : 'N/I'
-      };
-    });
-
-    processed.sort((a, b) => b.score - a.score);
-    setData(processed);
-    setCrmState(initialCrmState);
-    setErrorMsg('');
-  };
-
-  const getCrmData = (cnpj) => crmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
-
-  const updateCrm = (cnpj, field, value) => {
-    setCrmState(prev => {
-      const current = prev[cnpj] || { status: 'Não Contactado', consultoria: '' };
-      return { ...prev, [cnpj]: { ...current, [field]: value } };
-    });
-  };
-
-  const toggleSelection = (cnpj) => {
-    setSelectedLeads(prev => prev.includes(cnpj) ? prev.filter(id => id !== cnpj) : [...prev, cnpj]);
-  };
-
-  const toggleAll = () => {
-    if (selectedLeads.length === filteredData.length && filteredData.length > 0) {
-      setSelectedLeads([]);
-    } else {
-      setSelectedLeads(filteredData.map(d => d.cnpj_key));
-    }
-  };
-
-  const applyBulkAction = () => {
-    if (!bulkStatus || selectedLeads.length === 0) return;
-    const newCrmState = { ...crmState };
-    selectedLeads.forEach(cnpj => { 
-      const current = newCrmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
-      newCrmState[cnpj] = { ...current, status: bulkStatus }; 
-    });
-    setCrmState(newCrmState);
-    setSelectedLeads([]); 
-    setBulkStatus('');
-  };
-
-  const filteredData = useMemo(() => {
-    return data.filter(emp => {
-      const crm = getCrmData(emp.cnpj_key);
-      const matchCidade = filterCidade ? emp._CIDADE === filterCidade : true;
-      const matchPorte = filterPorte ? emp._PORTE === filterPorte : true;
-      const matchInteresse = emp.score >= filterInteresseMinimo;
-      const matchStatus = filterStatus !== 'Todos' ? crm.status === filterStatus : true;
-      
-      let matchInteresseEspecifico = true;
-      if (filterInteresseEspecifico === 'Nenhum') {
-        matchInteresseEspecifico = emp.interesses.length === 0;
-      } else if (filterInteresseEspecifico !== 'Todos') {
-        matchInteresseEspecifico = emp.interesses.includes(filterInteresseEspecifico);
-      }
-
-      return matchCidade && matchPorte && matchInteresse && matchStatus && matchInteresseEspecifico;
-    });
-  }, [data, crmState, filterCidade, filterPorte, filterInteresseMinimo, filterStatus, filterInteresseEspecifico]);
-
-  const isFilterActive = filterCidade !== '' || filterPorte !== '' || filterInteresseMinimo > 0 || filterStatus !== 'Todos' || filterInteresseEspecifico !== 'Todos';
-
-  const resetFilters = () => {
-    setFilterCidade(''); setFilterPorte(''); setFilterInteresseMinimo(0);
-    setFilterStatus('Todos'); setFilterInteresseEspecifico('Todos');
-  };
-
-  const cidadesUnicas = [...new Set(data.map(d => d._CIDADE).filter(Boolean))].sort();
-  const portesUnicos = [...new Set(data.map(d => d._PORTE).filter(Boolean))].sort();
-
-  const funnelData = useMemo(() => {
-    const counts = STATUS_CRM.reduce((acc, status) => { acc[status] = 0; return acc; }, {});
-    data.forEach(emp => { counts[getCrmData(emp.cnpj_key).status]++; });
-    return STATUS_CRM.map(status => ({ name: status, Quantidade: counts[status] }));
-  }, [data, crmState]);
-
-  const maxFunnelValue = Math.max(...funnelData.map(d => d.Quantidade), 1);
-
-  const generateCSV = (dataToExport, fileName) => {
-    if (dataToExport.length === 0) return;
-    const baseHeaders = Object.keys(dataToExport[0]).filter(k => 
-      !['score', 'explicitScore', 'isLookalike', 'curadoriaReason', 'interesses', 'cnpj_key', '_RAZAO_SOCIAL', '_CNPJ', '_CIDADE', '_SETOR', '_PORTE', '_NOME', '_TELEFONE', '_FUNCIONARIOS', 'Status da Negociação', 'Consultoria Foco'].includes(k)
-    );
+    <!-- React & ReactDOM (Lógica do App diretamente no navegador) -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
     
-    const headers = [...baseHeaders, 'Status da Negociação', 'Consultoria Foco', 'Origem da Qualificacao'];
+    <!-- Babel (Permite rodar o código da aplicação sem precisar de instaladores como Vite/NPM) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 
-    const rows = dataToExport.map(emp => {
-      const crm = getCrmData(emp.cnpj_key);
-      return headers.map(header => {
-        if (header === 'Status da Negociação') return `"${crm.status}"`;
-        if (header === 'Consultoria Foco') return `"${crm.consultoria || ''}"`;
-        if (header === 'Origem da Qualificacao') return `"${emp.isLookalike ? 'Curadoria Inteligente' : 'Interesse Direto'}"`;
-        return `"${emp[header] || ''}"`;
-      }).join(';');
-    });
+    <style>
+        /* Ajuste de base para evitar estouro de tela em monitores menores */
+        body, html { margin: 0; padding: 0; width: 100%; overflow-x: hidden; }
+        .min-w-0 { min-width: 0; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans">
+    <div id="root"></div>
 
-    const csvContent = [headers.join(';'), ...rows].join('\n');
-    const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+    <!-- CÓDIGO DA APLICAÇÃO -->
+    <script type="text/babel">
+        const { useState, useMemo, useEffect } = React;
 
-  const exportFiltered = () => {
-    const dataToExport = selectedLeads.length > 0 ? filteredData.filter(emp => selectedLeads.includes(emp.cnpj_key)) : filteredData;
-    generateCSV(dataToExport, `Acoes_Mercado_${dataToExport.length}_leads.csv`);
-  };
-  
-  const exportFullDatabase = () => generateCSV(data, 'data.csv');
+        // --- MAPEAMENTO DE ÍCONES (Seguro para GitHub Pages) ---
+        const IconFactory = (iconClass) => ({ size = 16, className = "" }) => (
+            <i className={`${iconClass} ${className}`} style={{ fontSize: size }}></i>
+        );
 
-  // --- Telas de Carregamento e Vazio ---
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
-        <div className="flex flex-col items-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-slate-600 font-medium">Carregando Painel CRM...</p>
-        </div>
-      </div>
-    );
-  }
+        const Upload = IconFactory('fa-solid fa-upload');
+        const Search = IconFactory('fa-solid fa-search');
+        const MapPin = IconFactory('fa-solid fa-map-marker-alt');
+        const User = IconFactory('fa-solid fa-user');
+        const Mail = IconFactory('fa-solid fa-envelope');
+        const Phone = IconFactory('fa-solid fa-phone');
+        const Download = IconFactory('fa-solid fa-download');
+        const BarChart2 = IconFactory('fa-solid fa-chart-bar');
+        const Briefcase = IconFactory('fa-solid fa-briefcase');
+        const Filter = IconFactory('fa-solid fa-filter');
+        const LayoutGrid = IconFactory('fa-solid fa-border-all');
+        const List = IconFactory('fa-solid fa-list');
+        const Info = IconFactory('fa-solid fa-info-circle');
+        const CheckSquare = IconFactory('fa-solid fa-check-square');
+        const Square = IconFactory('fa-regular fa-square');
+        const ArrowRightCircle = IconFactory('fa-solid fa-arrow-circle-right');
+        const Target = IconFactory('fa-solid fa-bullseye');
+        const ThermometerSun = IconFactory('fa-solid fa-thermometer-half');
+        const XCircle = IconFactory('fa-solid fa-times-circle');
+        const Save = IconFactory('fa-solid fa-save');
+        const Lightbulb = IconFactory('fa-solid fa-lightbulb');
+        const Trash2 = IconFactory('fa-solid fa-trash-alt');
+        const Zap = IconFactory('fa-solid fa-bolt');
+        const Building = IconFactory('fa-solid fa-building');
 
-  if (data.length === 0) {
-    return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
-        <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl max-w-2xl w-full text-center border border-slate-100">
-          <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Zap size={40} />
-          </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3">CRM Inteligência de Mercado</h1>
+        // --- CONSTANTES ---
+        const CONSULTORIAS = [
+          'ALI', 
+          'MANUFATURA ENXUTA', 
+          'EFICIÊNCIA ENERGÉTICA', 
+          'TRANSFORMAÇÃO DIGITAL'
+        ];
+
+        const STATUS_CRM = [
+          'Não Contactado',
+          'Em Contato',
+          'Apresentação/Mesa',
+          'Negociação',
+          'Proposta Emitida',
+          'Contrato Fechado',
+          'Perdido'
+        ];
+
+        const TERMOMETRO_CORES = {
+          0: { label: 'Frio', color: 'text-slate-500', bg: 'bg-slate-100', icon: '❄️', desc: 'Nenhum interesse mapeado' },
+          0.5: { label: 'Potencial', color: 'text-emerald-600', bg: 'bg-emerald-100', icon: '🎯', desc: 'Sósia: Mesmo Setor, Porte e Local' },
+          1: { label: 'Morno', color: 'text-yellow-600', bg: 'bg-yellow-100', icon: '🌤️', desc: 'Interesse em 1 consultoria' },
+          2: { label: 'Quente', color: 'text-orange-500', bg: 'bg-orange-100', icon: '🔥', desc: 'Interesse em 2 consultorias' },
+          3: { label: 'Muito Quente', color: 'text-red-500', bg: 'bg-red-100', icon: '🌋', desc: 'Interesse em 3 consultorias' },
+          4: { label: 'Estrela', color: 'text-purple-600', bg: 'bg-purple-100', icon: '⭐', desc: 'Interesse em todas as 4!' }
+        };
+
+        const FUNNEL_COLORS = {
+          'Não Contactado': { bg: 'bg-slate-200', text: 'text-slate-700', hover: 'hover:bg-slate-300' },
+          'Em Contato': { bg: 'bg-blue-200', text: 'text-blue-800', hover: 'hover:bg-blue-300' },
+          'Apresentação/Mesa': { bg: 'bg-yellow-200', text: 'text-yellow-800', hover: 'hover:bg-yellow-300' },
+          'Negociação': { bg: 'bg-orange-200', text: 'text-orange-800', hover: 'hover:bg-orange-300' },
+          'Proposta Emitida': { bg: 'bg-purple-200', text: 'text-purple-800', hover: 'hover:bg-purple-300' },
+          'Contrato Fechado': { bg: 'bg-green-300', text: 'text-green-900', hover: 'hover:bg-green-400' },
+          'Perdido': { bg: 'bg-red-200', text: 'text-red-800', hover: 'hover:bg-red-300' }
+        };
+
+        // --- COMPONENTE PRINCIPAL ---
+        function App() {
+          const [data, setData] = useState([]);
+          const [crmState, setCrmState] = useState({});
+          const [viewMode, setViewMode] = useState('table');
+          const [isLoading, setIsLoading] = useState(true);
+          const [errorMsg, setErrorMsg] = useState('');
           
-          {errorMsg ? (
-            <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-6 text-sm font-medium border border-red-200">
-              {errorMsg}
-            </div>
-          ) : (
-            <p className="text-slate-600 mb-8 text-base md:text-lg">
-              A base de dados não foi encontrada no servidor. Para iniciar, selecione a planilha que deseja vincular. Certifique-se de que o arquivo <code>data.csv</code> esteja na pasta <code>public</code> do seu projeto no GitHub.
-            </p>
-          )}
+          const [filterCidade, setFilterCidade] = useState('');
+          const [filterPorte, setFilterPorte] = useState('');
+          const [filterInteresseMinimo, setFilterInteresseMinimo] = useState(0);
+          const [filterStatus, setFilterStatus] = useState('Todos');
+          const [filterInteresseEspecifico, setFilterInteresseEspecifico] = useState('Todos');
 
-          <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 md:py-4 px-6 md:px-8 rounded-xl inline-flex items-center transition-all shadow-md hover:shadow-lg">
-            <Upload className="mr-3" size={24} />
-            Vincular Planilha (CSV)
-            <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
-          </label>
-        </div>
-      </div>
-    );
-  }
+          const [selectedLeads, setSelectedLeads] = useState([]);
+          const [bulkStatus, setBulkStatus] = useState('');
 
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32 w-full relative overflow-x-hidden">
-      
-      <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 w-full">
-        <div className="flex items-center space-x-3 w-full md:w-auto justify-center md:justify-start">
-          <Briefcase className="text-blue-400 shrink-0" size={28} />
-          <div className="flex-1 min-w-0">
-            <h1 className="text-lg md:text-xl font-bold leading-tight truncate">CRM Inteligência de Mercado</h1>
-            <p className="text-xs text-slate-400 truncate">Prospecção guiada por dados</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap justify-center gap-2 w-full md:w-auto">
-          <button onClick={exportFiltered} className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0 border border-slate-600">
-            <Download size={16} className="mr-1.5 md:mr-2" />
-            <span className="hidden sm:inline">Exportar</span> Visão
-          </button>
-          <button onClick={exportFullDatabase} className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0 border border-green-400">
-            <Save size={16} className="mr-1.5 md:mr-2" />
-            <span className="hidden sm:inline">Salvar</span> Base
-          </button>
-          <button onClick={clearLocalData} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0 border border-red-400">
-            <Trash2 size={16} className="sm:mr-1.5" />
-            <span className="hidden sm:inline">Resetar</span>
-          </button>
-        </div>
-      </header>
+          const decodeBuffer = (buffer) => {
+            try {
+              let decoderUtf8 = new TextDecoder('utf-8');
+              let text = decoderUtf8.decode(buffer);
+              if (text.includes('')) {
+                let decoderWin = new TextDecoder('windows-1252');
+                text = decoderWin.decode(buffer);
+              }
+              return text;
+            } catch(e) {
+              console.error("Erro na decodificação", e);
+              return "";
+            }
+          };
 
-      <main className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 w-full">
-        
-        <div className="bg-white rounded-xl p-5 md:p-6 shadow-sm border border-slate-200">
-          <h2 className="text-lg md:text-xl font-extrabold text-slate-800 mb-2">Bem-vindo ao seu Mapa de Oportunidades 🚀</h2>
-          <p className="text-slate-600 text-sm md:text-base leading-relaxed">
-            Seus dados estão sendo salvos <b>localmente neste navegador</b>. Você não perderá edições se recarregar a tela. Ao finalizar, utilize o botão <b>"Salvar Base"</b> para gerar o arquivo central.
-          </p>
-        </div>
-
-        <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between shadow-sm">
-          <div className="flex-1 w-full">
-            <h2 className="text-blue-800 font-bold flex items-center text-sm mb-1">
-              <Lightbulb size={18} className="mr-1.5 text-yellow-500"/> Sósias Inteligentes (Lookalike)
-            </h2>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Empresas sem registro explícito, mas que possuem a mesma <b>Localidade, Porte e Setor</b> de leads que converteram, recebem a inteligência <span className="font-bold text-emerald-600">🎯 Potencial</span>.
-            </p>
-          </div>
-          <div className="hidden lg:block w-px h-12 bg-blue-200 mx-4"></div>
-          <div className="flex-1 flex flex-col w-full">
-            <span className="text-xs font-semibold text-slate-500 mb-2">Termômetro de Interesse:</span>
-            <div className="flex flex-wrap gap-1.5 md:gap-2">
-              {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => (
-                <div key={score} className={`px-2 py-1 rounded text-[10px] font-bold ${config.bg} ${config.color} border border-white flex items-center shadow-sm whitespace-nowrap`} title={config.desc}>
-                  <span className="mr-1">{config.icon}</span> {config.label}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-            <h2 className="text-lg font-bold flex items-center text-slate-700">
-              <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline Geral de Vendas
-            </h2>
-            <span className="mt-2 sm:mt-0 text-[11px] font-semibold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
-              <Info size={14} className="mr-1 shrink-0" /> Clique nas barras para filtrar
-            </span>
-          </div>
-          
-          <div className="flex flex-col space-y-2.5 mt-4 w-full">
-            {funnelData.map((stage) => {
-              const config = FUNNEL_COLORS[stage.name];
-              const widthPercent = Math.max(15, (stage.Quantidade / maxFunnelValue) * 100);
-              const isActiveFilter = filterStatus === stage.name;
-              
-              return (
-                <button 
-                  key={stage.name} 
-                  onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)} 
-                  className="flex flex-col group w-full text-left outline-none cursor-pointer border-0 bg-transparent p-0"
-                >
-                  <div className="flex items-center text-xs font-medium text-slate-500 mb-0.5 ml-1 sm:hidden">{stage.name}</div>
-                  <div 
-                    style={{ width: `${widthPercent}%` }} 
-                    className={`
-                      relative h-10 rounded-r-xl rounded-l-md flex items-center justify-between px-3 transition-all duration-300 ease-out border
-                      ${config.bg} ${config.text} ${config.hover}
-                      ${isActiveFilter ? 'ring-2 ring-offset-2 ring-blue-500 shadow-md border-blue-300 z-10' : 'border-white/50 shadow-sm'}
-                    `}
-                  >
-                    <span className="font-semibold text-xs sm:text-sm truncate pr-2 hidden sm:block">{stage.name}</span>
-                    <span className="font-black text-sm sm:text-lg">{stage.Quantidade}</span>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-5 border-b border-slate-100 pb-4">
-            <h3 className="font-bold text-slate-800 text-lg flex items-center"><Filter size={20} className="text-blue-500 mr-2" /> Refine sua Busca</h3>
-            {isFilterActive && (
-              <button onClick={resetFilters} className="mt-3 sm:mt-0 text-sm flex items-center text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg font-semibold transition-colors border border-red-100 cursor-pointer outline-none">
-                <XCircle size={16} className="mr-1.5" /> Limpar Filtros
-              </button>
-            )}
-          </div>
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 w-full">
-            <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><MapPin size={16} className="mr-1.5 text-slate-400 shrink-0"/> Localidade</label>
-              <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterCidade} onChange={(e) => setFilterCidade(e.target.value)}>
-                <option value="">Todas as Cidades</option>
-                {cidadesUnicas.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Building size={16} className="mr-1.5 text-slate-400 shrink-0"/> Porte</label>
-              <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterPorte} onChange={(e) => setFilterPorte(e.target.value)}>
-                <option value="">Todos os Portes</option>
-                {portesUnicos.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Target size={16} className="mr-1.5 text-slate-400 shrink-0"/> Status Funil</label>
-              <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
-                <option value="Todos">Visualizando Todos</option>
-                {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Zap size={16} className="mr-1.5 text-slate-400 shrink-0"/> Foco do Produto</label>
-              <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterInteresseEspecifico} onChange={(e) => setFilterInteresseEspecifico(e.target.value)}>
-                <option value="Todos">Qualquer</option>
-                {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
-                <option value="Nenhum">Nenhum Explícito</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="flex flex-col border-t border-slate-100 pt-4">
-            <label className="text-sm font-bold text-slate-700 flex items-center mb-2"><ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Interesse Mínimo (Temperatura de corte)</label>
-            <div className="grid grid-cols-2 md:grid-cols-6 gap-2 w-full">
-              {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => {
-                const numericScore = Number(score);
-                const isActive = filterInteresseMinimo === numericScore; 
-                const isIncluded = numericScore >= filterInteresseMinimo; 
-                
-                return (
-                  <button 
-                    key={score} 
-                    onClick={() => setFilterInteresseMinimo(numericScore)} 
-                    className={`p-2 rounded-xl border text-[11px] md:text-xs transition-all flex flex-col items-center justify-center gap-1 cursor-pointer outline-none
-                    ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 z-10' : 
-                      isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60 grayscale'
-                    }`}
-                  >
-                    <span className="text-lg md:text-xl mb-0.5">{config.icon}</span>
-                    <span className={`font-bold text-center leading-tight truncate w-full px-1 ${isIncluded ? config.color : 'text-slate-400'}`}>{config.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-        </div>
-
-        <div className="w-full">
-          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
-            <div className="flex items-center w-full md:w-auto">
-              <h2 className="text-lg font-bold text-slate-800 flex items-center">
-                Mesa de Atuação <span className="ml-2 bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded-full">{filteredData.length} leads</span>
-              </h2>
-            </div>
+          const parseCSV = (text) => {
+            if (!text) return [];
+            const lines = text.split(/\r?\n/).filter(line => line && line.trim().length > 0);
+            if (lines.length === 0) return [];
             
-            <div className="flex bg-slate-200 rounded-lg p-1 w-full md:w-auto">
-              <button onClick={() => setViewMode('table')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors cursor-pointer outline-none ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:text-slate-800'}`}><List size={16} className="mr-1.5" /> Tabela</button>
-              <button onClick={() => setViewMode('cards')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors cursor-pointer outline-none ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:text-slate-800'}`}><LayoutGrid size={16} className="mr-1.5" /> Cards</button>
-            </div>
-          </div>
+            const headerLine = lines[0];
+            const delimiter = (headerLine.match(/;/g) || []).length >= (headerLine.match(/,/g) || []).length ? ';' : ',';
+
+            const parseLine = (str) => {
+              const result = [];
+              let current = '';
+              let inQuotes = false;
+              for (let i = 0; i < str.length; i++) {
+                const char = str[i];
+                if (char === '"' && str[i + 1] === '"') {
+                  current += '"'; i++;
+                } else if (char === '"') {
+                  inQuotes = !inQuotes;
+                } else if (char === delimiter && !inQuotes) {
+                  result.push(current.trim()); current = '';
+                } else {
+                  current += char;
+                }
+              }
+              result.push(current.trim());
+              return result;
+            };
+
+            const headers = parseLine(lines[0]).map(h => h ? h.replace(/^"|"$/g, '').trim() : `col_${Math.random()}`);
+            const parsedData = [];
+            
+            for (let i = 1; i < lines.length; i++) {
+              const values = parseLine(lines[i]);
+              const obj = {};
+              headers.forEach((h, index) => {
+                let val = values[index] || '';
+                if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+                obj[h] = val.trim();
+              });
+              parsedData.push(obj);
+            }
+            return parsedData;
+          };
+
+          useEffect(() => {
+            try {
+              const localData = localStorage.getItem('crm_data');
+              const localCrmState = localStorage.getItem('crm_state');
+
+              if (localData && localCrmState) {
+                setData(JSON.parse(localData));
+                setCrmState(JSON.parse(localCrmState));
+                setIsLoading(false);
+                return; 
+              }
+            } catch (e) { console.error("Erro no cache", e); }
+
+            fetch('data.csv')
+              .then(response => {
+                if (!response.ok) throw new Error('data.csv ausente');
+                return response.arrayBuffer();
+              })
+              .then(buffer => {
+                const text = decodeBuffer(buffer).replace(/^\uFEFF/, '');
+                const parsedData = parseCSV(text);
+                processData(parsedData);
+              })
+              .catch(err => {
+                console.log('Sem base vinculada. Requer upload manual.', err);
+                setIsLoading(false);
+              });
+          }, []);
+
+          useEffect(() => {
+            if (data.length > 0) {
+              try {
+                localStorage.setItem('crm_data', JSON.stringify(data));
+                localStorage.setItem('crm_state', JSON.stringify(crmState));
+              } catch(e) { console.warn("Falha ao salvar no local storage", e) }
+            }
+          }, [data, crmState]);
+
+          const clearLocalData = () => {
+            if(window.confirm("Atenção: Isso apagará o progresso salvo neste navegador. Deseja continuar?")) {
+              localStorage.removeItem('crm_data');
+              localStorage.removeItem('crm_state');
+              setData([]);
+              setCrmState({});
+              setErrorMsg('');
+            }
+          };
+
+          const handleFileUpload = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            setIsLoading(true);
+            setErrorMsg('');
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              try {
+                const buffer = event.target.result;
+                const text = decodeBuffer(buffer).replace(/^\uFEFF/, '');
+                const parsedData = parseCSV(text);
+                processData(parsedData);
+              } catch (err) {
+                console.error("Erro na leitura do arquivo:", err);
+                setErrorMsg("Formato de CSV inválido. Tente salvar a planilha novamente pelo Excel como 'CSV (UTF-8)'.");
+              } finally {
+                setIsLoading(false);
+                e.target.value = null; 
+              }
+            };
+            reader.readAsArrayBuffer(file);
+          };
+
+          const processData = (rawData) => {
+            if (!rawData || rawData.length === 0) {
+              setErrorMsg("A planilha está vazia ou não possui o formato correto.");
+              return;
+            }
+
+            const headers = Object.keys(rawData[0]);
+            const getCol = (keywords) => headers.find(h => keywords.some(k => h?.toString().toUpperCase().includes(k)));
+            
+            const numFuncCol = getCol(['FUNCIONÁRIO', 'FUNCIONARIO', 'COLABORADORES']);
+            const cnpjCol = getCol(['CNPJ']);
+            const razaoCol = getCol(['RAZÃO', 'RAZAO', 'EMPRESA']);
+            const cidadeCol = getCol(['CIDADE', 'MUNICÍPIO', 'MUNICIPIO']);
+            const setorCol = getCol(['SETOR', 'SEGMENTO']);
+            const porteCol = getCol(['PORTE', 'TAMANHO']);
+            const nomeCol = getCol(['NOME', 'CONTATO', 'RESPONSÁVEL']);
+            const telCol = getCol(['TELEFONE', 'CELULAR', 'WHATSAPP']);
+
+            let processed = rawData;
+            if (numFuncCol) {
+              processed = processed.filter(d => {
+                const val = d[numFuncCol]?.toString().toUpperCase() || '';
+                return val && !val.includes('ATÉ 04') && !val.includes('ATE 04');
+              });
+            }
+
+            if (processed.length === 0) {
+              setErrorMsg("Todas as empresas foram filtradas (ex: Nenhuma empresa acima de 5 colaboradores encontrada).");
+              return;
+            }
+
+            const profileStrength = {};
+            processed.forEach(empresa => {
+              let explicitScore = 0;
+              CONSULTORIAS.forEach(cons => { 
+                const col = headers.find(h => h?.toString().toUpperCase() === cons.toUpperCase());
+                if (col && empresa[col]?.toString().toUpperCase() === 'SIM') explicitScore += 1; 
+              });
+              empresa.explicitScore = explicitScore;
+
+              if (explicitScore > 0 && cidadeCol && porteCol && setorCol) {
+                const key = `${empresa[cidadeCol]}|${empresa[porteCol]}|${empresa[setorCol]}`;
+                profileStrength[key] = (profileStrength[key] || 0) + explicitScore;
+              }
+            });
+
+            const initialCrmState = {};
+
+            processed = processed.map((empresa, idx) => {
+              let score = empresa.explicitScore || 0;
+              let isLookalike = false;
+              let curadoriaReason = '';
+              let interesses = [];
+              
+              CONSULTORIAS.forEach(cons => { 
+                const col = headers.find(h => h?.toString().toUpperCase() === cons.toUpperCase());
+                if (col && empresa[col]?.toString().toUpperCase() === 'SIM') interesses.push(cons); 
+              });
+              
+              if (score === 0 && cidadeCol && porteCol && setorCol) {
+                const key = `${empresa[cidadeCol]}|${empresa[porteCol]}|${empresa[setorCol]}`;
+                const strength = profileStrength[key] || 0;
+                
+                if (strength >= 10) { score = 3; isLookalike = true; curadoriaReason = 'Alta conversão neste Perfil'; } 
+                else if (strength >= 5) { score = 2; isLookalike = true; curadoriaReason = 'Boa conversão neste Perfil'; } 
+                else if (strength >= 2) { score = 1; isLookalike = true; curadoriaReason = 'Alguma conversão neste Perfil'; } 
+                else if (strength === 1) { score = 0.5; isLookalike = true; curadoriaReason = 'Perfil Semelhante a leads'; }
+              }
+
+              const idCnpj = (cnpjCol && empresa[cnpjCol]) ? empresa[cnpjCol].toString() : '';
+              const cnpj_key = idCnpj ? `${idCnpj}-${idx}` : `fallback-id-${idx}`;
+              
+              const statusLido = headers.includes('Status da Negociação') ? empresa['Status da Negociação'] : 'Não Contactado';
+              const consultoriaLida = headers.includes('Consultoria Foco') ? empresa['Consultoria Foco'] : '';
+
+              initialCrmState[cnpj_key] = {
+                status: STATUS_CRM.includes(statusLido) ? statusLido : 'Não Contactado',
+                consultoria: CONSULTORIAS.includes(consultoriaLida) ? consultoriaLida : ''
+              };
+
+              return { 
+                ...empresa, 
+                score, interesses, isLookalike, curadoriaReason, cnpj_key,
+                _RAZAO_SOCIAL: (razaoCol && empresa[razaoCol]) ? empresa[razaoCol] : 'Empresa Indefinida',
+                _CNPJ: idCnpj || 'CNPJ N/D',
+                _CIDADE: (cidadeCol && empresa[cidadeCol]) ? empresa[cidadeCol] : '-',
+                _SETOR: (setorCol && empresa[setorCol]) ? empresa[setorCol] : '-',
+                _PORTE: (porteCol && empresa[porteCol]) ? empresa[porteCol] : '-',
+                _NOME: (nomeCol && empresa[nomeCol]) ? empresa[nomeCol] : '-',
+                _TELEFONE: (telCol && empresa[telCol]) ? empresa[telCol] : '-',
+                _FUNCIONARIOS: (numFuncCol && empresa[numFuncCol]) ? empresa[numFuncCol] : 'N/I'
+              };
+            });
+
+            processed.sort((a, b) => b.score - a.score);
+            setData(processed);
+            setCrmState(initialCrmState);
+            setErrorMsg('');
+          };
+
+          const getCrmData = (cnpj) => crmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
+
+          const updateCrm = (cnpj, field, value) => {
+            setCrmState(prev => {
+              const current = prev[cnpj] || { status: 'Não Contactado', consultoria: '' };
+              return { ...prev, [cnpj]: { ...current, [field]: value } };
+            });
+          };
+
+          const toggleSelection = (cnpj) => {
+            setSelectedLeads(prev => prev.includes(cnpj) ? prev.filter(id => id !== cnpj) : [...prev, cnpj]);
+          };
+
+          const toggleAll = () => {
+            if (selectedLeads.length === filteredData.length && filteredData.length > 0) {
+              setSelectedLeads([]);
+            } else {
+              setSelectedLeads(filteredData.map(d => d.cnpj_key));
+            }
+          };
+
+          const applyBulkAction = () => {
+            if (!bulkStatus || selectedLeads.length === 0) return;
+            const newCrmState = { ...crmState };
+            selectedLeads.forEach(cnpj => { 
+              const current = newCrmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
+              newCrmState[cnpj] = { ...current, status: bulkStatus }; 
+            });
+            setCrmState(newCrmState);
+            setSelectedLeads([]); 
+            setBulkStatus('');
+          };
+
+          const filteredData = useMemo(() => {
+            return data.filter(emp => {
+              const crm = getCrmData(emp.cnpj_key);
+              const matchCidade = filterCidade ? emp._CIDADE === filterCidade : true;
+              const matchPorte = filterPorte ? emp._PORTE === filterPorte : true;
+              const matchInteresse = emp.score >= filterInteresseMinimo;
+              const matchStatus = filterStatus !== 'Todos' ? crm.status === filterStatus : true;
+              
+              let matchInteresseEspecifico = true;
+              if (filterInteresseEspecifico === 'Nenhum') {
+                matchInteresseEspecifico = emp.interesses.length === 0;
+              } else if (filterInteresseEspecifico !== 'Todos') {
+                matchInteresseEspecifico = emp.interesses.includes(filterInteresseEspecifico);
+              }
+
+              return matchCidade && matchPorte && matchInteresse && matchStatus && matchInteresseEspecifico;
+            });
+          }, [data, crmState, filterCidade, filterPorte, filterInteresseMinimo, filterStatus, filterInteresseEspecifico]);
+
+          const isFilterActive = filterCidade !== '' || filterPorte !== '' || filterInteresseMinimo > 0 || filterStatus !== 'Todos' || filterInteresseEspecifico !== 'Todos';
+
+          const resetFilters = () => {
+            setFilterCidade(''); setFilterPorte(''); setFilterInteresseMinimo(0);
+            setFilterStatus('Todos'); setFilterInteresseEspecifico('Todos');
+          };
+
+          const cidadesUnicas = [...new Set(data.map(d => d._CIDADE).filter(Boolean))].sort();
+          const portesUnicos = [...new Set(data.map(d => d._PORTE).filter(Boolean))].sort();
+
+          const funnelData = useMemo(() => {
+            const counts = STATUS_CRM.reduce((acc, status) => { acc[status] = 0; return acc; }, {});
+            data.forEach(emp => { counts[getCrmData(emp.cnpj_key).status]++; });
+            return STATUS_CRM.map(status => ({ name: status, Quantidade: counts[status] }));
+          }, [data, crmState]);
+
+          const maxFunnelValue = Math.max(...funnelData.map(d => d.Quantidade), 1);
+
+          const generateCSV = (dataToExport, fileName) => {
+            if (dataToExport.length === 0) return;
+            const baseHeaders = Object.keys(dataToExport[0]).filter(k => 
+              !['score', 'explicitScore', 'isLookalike', 'curadoriaReason', 'interesses', 'cnpj_key', '_RAZAO_SOCIAL', '_CNPJ', '_CIDADE', '_SETOR', '_PORTE', '_NOME', '_TELEFONE', '_FUNCIONARIOS', 'Status da Negociação', 'Consultoria Foco'].includes(k)
+            );
+            
+            const headers = [...baseHeaders, 'Status da Negociação', 'Consultoria Foco', 'Origem da Qualificacao'];
+
+            const rows = dataToExport.map(emp => {
+              const crm = getCrmData(emp.cnpj_key);
+              return headers.map(header => {
+                if (header === 'Status da Negociação') return `"${crm.status}"`;
+                if (header === 'Consultoria Foco') return `"${crm.consultoria || ''}"`;
+                if (header === 'Origem da Qualificacao') return `"${emp.isLookalike ? 'Curadoria Inteligente' : 'Interesse Direto'}"`;
+                return `"${emp[header] || ''}"`;
+              }).join(';');
+            });
+
+            const csvContent = [headers.join(';'), ...rows].join('\n');
+            const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.setAttribute('download', fileName);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          };
+
+          const exportFiltered = () => {
+            const dataToExport = selectedLeads.length > 0 ? filteredData.filter(emp => selectedLeads.includes(emp.cnpj_key)) : filteredData;
+            generateCSV(dataToExport, `Acoes_Mercado_${dataToExport.length}_leads.csv`);
+          };
           
-          {viewMode === 'table' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full">
-              <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap min-w-[900px]">
-                <thead className="text-xs text-slate-700 uppercase bg-slate-100 border-b border-slate-200">
-                  <tr>
-                    <th className="px-3 md:px-4 py-3 md:py-4 w-12 text-center sticky left-0 z-20 bg-slate-100 border-r border-slate-200">
-                      <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors p-1 outline-none cursor-pointer border-0 bg-transparent">
-                        {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
-                      </button>
-                    </th>
-                    <th className="px-4 py-3">Termômetro</th>
-                    <th className="px-4 py-3">Empresa</th>
-                    <th className="px-4 py-3">Colaboradores</th>
-                    <th className="px-4 py-3">Contato</th>
-                    <th className="px-4 py-3">Status CRM</th>
-                    <th className="px-4 py-3">Consultoria Foco</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredData.map((emp) => {
-                    const crm = getCrmData(emp.cnpj_key);
-                    const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
-                    const isSelected = selectedLeads.includes(emp.cnpj_key);
-                    
-                    const rowClass = isSelected ? 'bg-indigo-50 border-indigo-100' : 'bg-white hover:bg-slate-50 border-slate-100';
-                    const stickyColBg = isSelected ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50';
+          const exportFullDatabase = () => generateCSV(data, 'data.csv');
 
-                    return (
-                      <tr key={emp.cnpj_key} className={`border-b transition-colors group ${rowClass}`}>
-                        <td className={`px-3 md:px-4 py-3 text-center sticky left-0 z-10 border-r border-slate-200 shadow-sm ${stickyColBg}`}>
-                          <button onClick={() => toggleSelection(emp.cnpj_key)} className={`p-1 outline-none cursor-pointer border-0 bg-transparent ${isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}`}>
-                            {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
-                          </button>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${scoreData.bg} ${scoreData.color}`} title={scoreData.desc}>
-                            {scoreData.icon} <span className="ml-1.5">{emp.score}</span>
-                          </span>
-                          {emp.isLookalike && emp.score > 0 && (
-                            <div className="mt-1.5 flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-1.5 py-0.5 rounded-md w-fit">
-                              <Target size={12} className="mr-1"/> Curadoria
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 max-w-[200px]">
-                          <div className="font-bold text-slate-800 truncate" title={emp._RAZAO_SOCIAL}>{emp._RAZAO_SOCIAL}</div>
-                          <div className="text-xs text-slate-400 mt-0.5 truncate" title={`${emp._CIDADE} • ${emp._SETOR}`}>{emp._CIDADE} • {emp._SETOR?.substring(0, 15)}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded">
-                            {emp._FUNCIONARIOS}
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 max-w-[150px]">
-                          <div className="font-medium text-slate-700 truncate" title={emp._NOME}>{emp._NOME}</div>
-                          <div className="text-xs text-slate-500 truncate">{emp._TELEFONE}</div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <select className="border border-slate-200 rounded-lg p-2 text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[140px] cursor-pointer" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
-                            {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
-                          </select>
-                        </td>
-                        <td className="px-4 py-3">
-                          <select className="border border-slate-200 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[140px] cursor-pointer" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
-                            <option value="">Definir Foco...</option>
-                            {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
-                          </select>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {filteredData.length === 0 && (
-                    <tr><td colSpan="7" className="px-4 py-16 text-center text-slate-500 font-medium">Nenhum resultado corresponde a esses filtros.</td></tr>
+          if (isLoading) {
+            return (
+              <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
+                <div className="flex flex-col items-center">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
+                  <p className="text-slate-600 font-medium">Carregando Painel CRM...</p>
+                </div>
+              </div>
+            );
+          }
+
+          if (data.length === 0) {
+            return (
+              <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
+                <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl max-w-2xl w-full text-center border border-slate-100">
+                  <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
+                    <Zap size={40} />
+                  </div>
+                  <h1 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3">CRM Inteligência de Mercado</h1>
+                  
+                  {errorMsg ? (
+                    <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-6 text-sm font-medium border border-red-200">
+                      {errorMsg}
+                    </div>
+                  ) : (
+                    <p className="text-slate-600 mb-8 text-base md:text-lg">
+                      A base de dados não foi encontrada no servidor. Para iniciar, selecione a planilha que deseja vincular. Certifique-se de que o arquivo <code>data.csv</code> esteja na mesma pasta que o arquivo HTML.
+                    </p>
                   )}
-                </tbody>
-              </table>
-            </div>
-          )}
 
-          {viewMode === 'cards' && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 w-full">
-              {filteredData.map((emp) => {
-                const crm = getCrmData(emp.cnpj_key);
-                const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
-                const isSelected = selectedLeads.includes(emp.cnpj_key);
+                  <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 md:py-4 px-6 md:px-8 rounded-xl inline-flex items-center transition-all shadow-md hover:shadow-lg">
+                    <Upload className="mr-3" size={24} />
+                    Vincular Planilha (CSV)
+                    <input type="file" accept=".csv" className="hidden" onChange={handleFileUpload} />
+                  </label>
+                </div>
+              </div>
+            );
+          }
 
-                return (
-                  <div key={emp.cnpj_key} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col relative transition-all ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1 shadow-md' : 'border-slate-200 hover:shadow-md'}`}>
-                    <button onClick={() => toggleSelection(emp.cnpj_key)} className={`absolute top-3 left-3 z-10 p-1 bg-white rounded shadow-sm outline-none cursor-pointer border-0 ${isSelected ? 'text-indigo-600' : 'text-slate-300'}`}>
-                      {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
-                    </button>
-                    <div className={`p-4 pl-12 border-b border-white/50 flex justify-between items-start ${scoreData.bg}`}>
-                      <div className="flex-1 pr-2 min-w-0">
-                        <h3 className="font-bold text-slate-800 text-sm leading-tight truncate mb-1" title={emp._RAZAO_SOCIAL}>{emp._RAZAO_SOCIAL}</h3>
-                        <p className="text-[11px] text-slate-600 font-mono truncate">{emp._CNPJ}</p>
-                      </div>
-                      <div className="flex flex-col items-end shrink-0 gap-1.5">
-                        <div className={`px-2 py-1 rounded bg-white/60 text-[10px] md:text-xs font-bold ${scoreData.color}`} title={scoreData.desc}>
-                          {scoreData.icon} <span className="hidden xs:inline">{scoreData.label}</span>
+          return (
+            <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32 w-full relative overflow-x-hidden">
+              
+              <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 w-full">
+                <div className="flex items-center space-x-3 w-full md:w-auto justify-center md:justify-start">
+                  <Briefcase className="text-blue-400 shrink-0" size={28} />
+                  <div className="flex-1 min-w-0">
+                    <h1 className="text-lg md:text-xl font-bold leading-tight truncate">CRM Inteligência de Mercado</h1>
+                    <p className="text-xs text-slate-400 truncate">Prospecção guiada por dados</p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-center gap-2 w-full md:w-auto">
+                  <button onClick={exportFiltered} className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0 border border-slate-600">
+                    <Download size={16} className="mr-1.5 md:mr-2" />
+                    <span className="hidden sm:inline">Exportar</span> Visão
+                  </button>
+                  <button onClick={exportFullDatabase} className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0 border border-green-400">
+                    <Save size={16} className="mr-1.5 md:mr-2" />
+                    <span className="hidden sm:inline">Salvar</span> Base
+                  </button>
+                  <button onClick={clearLocalData} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0 border border-red-400">
+                    <Trash2 size={16} className="sm:mr-1.5" />
+                    <span className="hidden sm:inline">Resetar</span>
+                  </button>
+                </div>
+              </header>
+
+              <main className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 w-full">
+                
+                <div className="bg-white rounded-xl p-5 md:p-6 shadow-sm border border-slate-200">
+                  <h2 className="text-lg md:text-xl font-extrabold text-slate-800 mb-2">Bem-vindo ao seu Mapa de Oportunidades 🚀</h2>
+                  <p className="text-slate-600 text-sm md:text-base leading-relaxed">
+                    Seus dados estão sendo salvos <b>localmente neste navegador</b>. Você não perderá edições se recarregar a tela. Ao finalizar, utilize o botão <b>"Salvar Base"</b> para gerar o arquivo central.
+                  </p>
+                </div>
+
+                <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between shadow-sm">
+                  <div className="flex-1 w-full">
+                    <h2 className="text-blue-800 font-bold flex items-center text-sm mb-1">
+                      <Lightbulb size={18} className="mr-1.5 text-yellow-500"/> Sósias Inteligentes (Lookalike)
+                    </h2>
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      Empresas sem registro explícito, mas que possuem a mesma <b>Localidade, Porte e Setor</b> de leads que converteram, recebem a inteligência <span className="font-bold text-emerald-600">🎯 Potencial</span>.
+                    </p>
+                  </div>
+                  <div className="hidden lg:block w-px h-12 bg-blue-200 mx-4"></div>
+                  <div className="flex-1 flex flex-col w-full">
+                    <span className="text-xs font-semibold text-slate-500 mb-2">Termômetro de Interesse:</span>
+                    <div className="flex flex-wrap gap-1.5 md:gap-2">
+                      {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => (
+                        <div key={score} className={`px-2 py-1 rounded text-[10px] font-bold ${config.bg} ${config.color} border border-white flex items-center shadow-sm whitespace-nowrap`} title={config.desc}>
+                          <span className="mr-1">{config.icon}</span> {config.label}
                         </div>
-                        {emp.isLookalike && emp.score > 0 && (
-                          <div className="flex items-center text-[9px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-200">
-                            <Target size={10} className="mr-1"/> Curadoria
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                    <div className="p-4 space-y-2 flex-1 text-xs md:text-sm text-slate-600">
-                      <div className="flex items-start"><User size={14} className="mr-2 text-slate-400 mt-1 shrink-0" /><span className="truncate">{emp._NOME}</span></div>
-                      <div className="flex items-center"><Phone size={14} className="mr-2 text-slate-400 shrink-0" /><span>{emp._TELEFONE}</span></div>
-                      <div className="flex items-center" title="Local e Setor"><MapPin size={14} className="mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp._CIDADE} • {emp._SETOR?.substring(0, 15)}</span></div>
-                      <div className="flex items-center" title="Número de Funcionários"><Building size={14} className="mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp._FUNCIONARIOS}</span></div>
-                    </div>
-                    <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3">
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Status CRM</label>
-                        <select className="w-full border-slate-300 rounded-lg p-2 text-sm font-semibold bg-white outline-none focus:ring-2 focus:ring-blue-500 border cursor-pointer" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
-                          {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Consultoria Foco</label>
-                        <select className="w-full border-slate-300 rounded-lg p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 border cursor-pointer" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
-                          <option value="">Definir Consultoria...</option>
-                          {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
-                        </select>
-                      </div>
+                      ))}
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </main>
+                </div>
 
-      {/* BARRA FIXA DE AÇÃO EM MASSA */}
-      {selectedLeads.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] md:w-auto bg-indigo-600 text-white p-4 rounded-xl shadow-2xl flex flex-col md:flex-row items-center justify-between z-[100] border border-indigo-400/50">
-          <div className="flex flex-col sm:flex-row items-center mb-3 md:mb-0 w-full md:w-auto text-center md:text-left md:mr-6">
-            <div className="flex items-center justify-center md:justify-start">
-              <CheckSquare size={20} className="mr-2 text-indigo-200 shrink-0" />
-              <span className="font-bold text-base whitespace-nowrap">{selectedLeads.length} selecionadas</span>
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
+                    <h2 className="text-lg font-bold flex items-center text-slate-700">
+                      <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline Geral de Vendas
+                    </h2>
+                    <span className="mt-2 sm:mt-0 text-[11px] font-semibold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
+                      <Info size={14} className="mr-1 shrink-0" /> Clique nas barras para filtrar
+                    </span>
+                  </div>
+                  
+                  <div className="flex flex-col space-y-2.5 mt-4 w-full">
+                    {funnelData.map((stage) => {
+                      const config = FUNNEL_COLORS[stage.name];
+                      const widthPercent = Math.max(15, (stage.Quantidade / maxFunnelValue) * 100);
+                      const isActiveFilter = filterStatus === stage.name;
+                      
+                      return (
+                        <button 
+                          key={stage.name} 
+                          onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)} 
+                          className="flex flex-col group w-full text-left outline-none cursor-pointer border-0 bg-transparent p-0"
+                        >
+                          <div className="flex items-center text-xs font-medium text-slate-500 mb-0.5 ml-1 sm:hidden">{stage.name}</div>
+                          <div 
+                            style={{ width: `${widthPercent}%` }} 
+                            className={`
+                              relative h-10 rounded-r-xl rounded-l-md flex items-center justify-between px-3 transition-all duration-300 ease-out border
+                              ${config.bg} ${config.text} ${config.hover}
+                              ${isActiveFilter ? 'ring-2 ring-offset-2 ring-blue-500 shadow-md border-blue-300 z-10' : 'border-white/50 shadow-sm'}
+                            `}
+                          >
+                            <span className="font-semibold text-xs sm:text-sm truncate pr-2 hidden sm:block">{stage.name}</span>
+                            <span className="font-black text-sm sm:text-lg">{stage.Quantidade}</span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-5 border-b border-slate-100 pb-4">
+                    <h3 className="font-bold text-slate-800 text-lg flex items-center"><Filter size={20} className="text-blue-500 mr-2" /> Refine sua Busca</h3>
+                    {isFilterActive && (
+                      <button onClick={resetFilters} className="mt-3 sm:mt-0 text-sm flex items-center text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg font-semibold transition-colors border border-red-100 cursor-pointer outline-none">
+                        <XCircle size={16} className="mr-1.5" /> Limpar Filtros
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 w-full">
+                    <div className="flex flex-col min-w-0">
+                      <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><MapPin size={16} className="mr-1.5 text-slate-400 shrink-0"/> Localidade</label>
+                      <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterCidade} onChange={(e) => setFilterCidade(e.target.value)}>
+                        <option value="">Todas as Cidades</option>
+                        {cidadesUnicas.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Building size={16} className="mr-1.5 text-slate-400 shrink-0"/> Porte</label>
+                      <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterPorte} onChange={(e) => setFilterPorte(e.target.value)}>
+                        <option value="">Todos os Portes</option>
+                        {portesUnicos.map(p => <option key={p} value={p}>{p}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Target size={16} className="mr-1.5 text-slate-400 shrink-0"/> Status Funil</label>
+                      <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                        <option value="Todos">Visualizando Todos</option>
+                        {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div className="flex flex-col min-w-0">
+                      <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Zap size={16} className="mr-1.5 text-slate-400 shrink-0"/> Foco do Produto</label>
+                      <select className="w-full border rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 cursor-pointer" value={filterInteresseEspecifico} onChange={(e) => setFilterInteresseEspecifico(e.target.value)}>
+                        <option value="Todos">Qualquer</option>
+                        {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                        <option value="Nenhum">Nenhum Explícito</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col border-t border-slate-100 pt-4">
+                    <label className="text-sm font-bold text-slate-700 flex items-center mb-2"><ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Interesse Mínimo (Temperatura de corte)</label>
+                    <div className="grid grid-cols-2 md:grid-cols-6 gap-2 w-full">
+                      {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => {
+                        const numericScore = Number(score);
+                        const isActive = filterInteresseMinimo === numericScore; 
+                        const isIncluded = numericScore >= filterInteresseMinimo; 
+                        
+                        return (
+                          <button 
+                            key={score} 
+                            onClick={() => setFilterInteresseMinimo(numericScore)} 
+                            className={`p-2 rounded-xl border text-[11px] md:text-xs transition-all flex flex-col items-center justify-center gap-1 cursor-pointer outline-none
+                            ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 z-10' : 
+                              isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60 grayscale'
+                            }`}
+                          >
+                            <span className="text-lg md:text-xl mb-0.5">{config.icon}</span>
+                            <span className={`font-bold text-center leading-tight truncate w-full px-1 ${isIncluded ? config.color : 'text-slate-400'}`}>{config.label}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="w-full">
+                  <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
+                    <div className="flex items-center w-full md:w-auto">
+                      <h2 className="text-lg font-bold text-slate-800 flex items-center">
+                        Mesa de Atuação <span className="ml-2 bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded-full">{filteredData.length} leads</span>
+                      </h2>
+                    </div>
+                    
+                    <div className="flex bg-slate-200 rounded-lg p-1 w-full md:w-auto">
+                      <button onClick={() => setViewMode('table')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors cursor-pointer outline-none ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:text-slate-800'}`}><List size={16} className="mr-1.5" /> Tabela</button>
+                      <button onClick={() => setViewMode('cards')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors cursor-pointer outline-none ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600 hover:text-slate-800'}`}><LayoutGrid size={16} className="mr-1.5" /> Cards</button>
+                    </div>
+                  </div>
+                  
+                  {viewMode === 'table' && (
+                    <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full">
+                      <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap min-w-[900px]">
+                        <thead className="text-xs text-slate-700 uppercase bg-slate-100 border-b border-slate-200">
+                          <tr>
+                            <th className="px-3 md:px-4 py-3 md:py-4 w-12 text-center sticky left-0 z-20 bg-slate-100 border-r border-slate-200">
+                              <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors p-1 outline-none cursor-pointer border-0 bg-transparent">
+                                {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                              </button>
+                            </th>
+                            <th className="px-4 py-3">Termômetro</th>
+                            <th className="px-4 py-3">Empresa</th>
+                            <th className="px-4 py-3">Colaboradores</th>
+                            <th className="px-4 py-3">Contato</th>
+                            <th className="px-4 py-3">Status CRM</th>
+                            <th className="px-4 py-3">Consultoria Foco</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredData.map((emp) => {
+                            const crm = getCrmData(emp.cnpj_key);
+                            const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
+                            const isSelected = selectedLeads.includes(emp.cnpj_key);
+                            
+                            const rowClass = isSelected ? 'bg-indigo-50 border-indigo-100' : 'bg-white hover:bg-slate-50 border-slate-100';
+                            const stickyColBg = isSelected ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50';
+
+                            return (
+                              <tr key={emp.cnpj_key} className={`border-b transition-colors group ${rowClass}`}>
+                                <td className={`px-3 md:px-4 py-3 text-center sticky left-0 z-10 border-r border-slate-200 shadow-sm ${stickyColBg}`}>
+                                  <button onClick={() => toggleSelection(emp.cnpj_key)} className={`p-1 outline-none cursor-pointer border-0 bg-transparent ${isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                                    {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                                  </button>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`inline-flex items-center px-2.5 py-1 rounded-md text-xs font-bold ${scoreData.bg} ${scoreData.color}`} title={scoreData.desc}>
+                                    {scoreData.icon} <span className="ml-1.5">{emp.score}</span>
+                                  </span>
+                                  {emp.isLookalike && emp.score > 0 && (
+                                    <div className="mt-1.5 flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-1.5 py-0.5 rounded-md w-fit">
+                                      <Target size={12} className="mr-1"/> Curadoria
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-4 py-3 max-w-[200px]">
+                                  <div className="font-bold text-slate-800 truncate" title={emp._RAZAO_SOCIAL}>{emp._RAZAO_SOCIAL}</div>
+                                  <div className="text-xs text-slate-400 mt-0.5 truncate" title={`${emp._CIDADE} • ${emp._SETOR}`}>{emp._CIDADE} • {emp._SETOR?.substring(0, 15)}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="inline-flex items-center text-[11px] font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded">
+                                    {emp._FUNCIONARIOS}
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 max-w-[150px]">
+                                  <div className="font-medium text-slate-700 truncate" title={emp._NOME}>{emp._NOME}</div>
+                                  <div className="text-xs text-slate-500 truncate">{emp._TELEFONE}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <select className="border border-slate-200 rounded-lg p-2 text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[140px] cursor-pointer" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
+                                    {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+                                  </select>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <select className="border border-slate-200 rounded-lg p-2 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[140px] cursor-pointer" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
+                                    <option value="">Definir Foco...</option>
+                                    {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                                  </select>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          {filteredData.length === 0 && (
+                            <tr><td colSpan="7" className="px-4 py-16 text-center text-slate-500 font-medium">Nenhum resultado corresponde a esses filtros.</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {viewMode === 'cards' && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 w-full">
+                      {filteredData.map((emp) => {
+                        const crm = getCrmData(emp.cnpj_key);
+                        const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
+                        const isSelected = selectedLeads.includes(emp.cnpj_key);
+
+                        return (
+                          <div key={emp.cnpj_key} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col relative transition-all ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1 shadow-md' : 'border-slate-200 hover:shadow-md'}`}>
+                            <button onClick={() => toggleSelection(emp.cnpj_key)} className={`absolute top-3 left-3 z-10 p-1 bg-white rounded shadow-sm outline-none cursor-pointer border-0 ${isSelected ? 'text-indigo-600' : 'text-slate-300'}`}>
+                              {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                            </button>
+                            <div className={`p-4 pl-12 border-b border-white/50 flex justify-between items-start ${scoreData.bg}`}>
+                              <div className="flex-1 pr-2 min-w-0">
+                                <h3 className="font-bold text-slate-800 text-sm leading-tight truncate mb-1" title={emp._RAZAO_SOCIAL}>{emp._RAZAO_SOCIAL}</h3>
+                                <p className="text-[11px] text-slate-600 font-mono truncate">{emp._CNPJ}</p>
+                              </div>
+                              <div className="flex flex-col items-end shrink-0 gap-1.5">
+                                <div className={`px-2 py-1 rounded bg-white/60 text-[10px] md:text-xs font-bold ${scoreData.color}`} title={scoreData.desc}>
+                                  {scoreData.icon} <span className="hidden xs:inline">{scoreData.label}</span>
+                                </div>
+                                {emp.isLookalike && emp.score > 0 && (
+                                  <div className="flex items-center text-[9px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-200">
+                                    <Target size={10} className="mr-1"/> Curadoria
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                            <div className="p-4 space-y-2 flex-1 text-xs md:text-sm text-slate-600">
+                              <div className="flex items-start"><User size={14} className="mr-2 text-slate-400 mt-1 shrink-0" /><span className="truncate">{emp._NOME}</span></div>
+                              <div className="flex items-center"><Phone size={14} className="mr-2 text-slate-400 shrink-0" /><span>{emp._TELEFONE}</span></div>
+                              <div className="flex items-center" title="Local e Setor"><MapPin size={14} className="mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp._CIDADE} • {emp._SETOR?.substring(0, 15)}</span></div>
+                              <div className="flex items-center" title="Número de Funcionários"><Building size={14} className="mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp._FUNCIONARIOS}</span></div>
+                            </div>
+                            <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3">
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Status CRM</label>
+                                <select className="w-full border-slate-300 rounded-lg p-2 text-sm font-semibold bg-white outline-none focus:ring-2 focus:ring-blue-500 border cursor-pointer" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
+                                  {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Consultoria Foco</label>
+                                <select className="w-full border-slate-300 rounded-lg p-2 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 border cursor-pointer" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
+                                  <option value="">Definir Consultoria...</option>
+                                  {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </main>
+
+              {/* BARRA FIXA DE AÇÃO EM MASSA */}
+              {selectedLeads.length > 0 && (
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] md:w-auto bg-indigo-600 text-white p-4 rounded-xl shadow-2xl flex flex-col md:flex-row items-center justify-between z-[100] border border-indigo-400/50">
+                  <div className="flex flex-col sm:flex-row items-center mb-3 md:mb-0 w-full md:w-auto text-center md:text-left md:mr-6">
+                    <div className="flex items-center justify-center md:justify-start">
+                      <CheckSquare size={20} className="mr-2 text-indigo-200 shrink-0" />
+                      <span className="font-bold text-base whitespace-nowrap">{selectedLeads.length} selecionadas</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center w-full md:w-auto space-x-2 md:space-x-3">
+                    <select className="flex-1 md:w-48 border-none rounded-lg p-2.5 text-sm text-slate-800 font-semibold shadow-inner outline-none h-11 cursor-pointer" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
+                      <option value="">Mover para status...</option>
+                      {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                    <button onClick={applyBulkAction} disabled={!bulkStatus} className="bg-white text-indigo-600 px-4 md:px-5 py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-11 shrink-0 cursor-pointer outline-none border-0">
+                      Aplicar <ArrowRightCircle size={18} className="ml-1.5 hidden sm:block"/>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-          <div className="flex items-center w-full md:w-auto space-x-2 md:space-x-3">
-            <select className="flex-1 md:w-48 border-none rounded-lg p-2.5 text-sm text-slate-800 font-semibold shadow-inner outline-none h-11 cursor-pointer" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
-              <option value="">Mover para status...</option>
-              {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
-            <button onClick={applyBulkAction} disabled={!bulkStatus} className="bg-white text-indigo-600 px-4 md:px-5 py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-11 shrink-0 cursor-pointer outline-none border-0">
-              Aplicar <ArrowRightCircle size={18} className="ml-1.5 hidden sm:block"/>
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
