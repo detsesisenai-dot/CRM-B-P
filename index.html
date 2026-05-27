@@ -50,14 +50,12 @@ export default function App() {
   const [viewMode, setViewMode] = useState('table');
   const [isLoading, setIsLoading] = useState(true);
   
-  // Estados de Filtro
   const [filterCidade, setFilterCidade] = useState('');
   const [filterPorte, setFilterPorte] = useState('');
   const [filterInteresseMinimo, setFilterInteresseMinimo] = useState(0);
   const [filterStatus, setFilterStatus] = useState('Todos');
   const [filterInteresseEspecifico, setFilterInteresseEspecifico] = useState('Todos');
 
-  // Estados de Seleção em Massa
   const [selectedLeads, setSelectedLeads] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('');
 
@@ -72,12 +70,11 @@ export default function App() {
     return text;
   };
 
-  // --- Parser Auto-Adaptável de CSV (Tolerante a falhas) ---
+  // --- Parser Auto-Adaptável de CSV ---
   const parseCSV = (text) => {
     const lines = text.split(/\r?\n/).filter(line => line.trim());
     if (lines.length === 0) return [];
     
-    // Auto-detectar delimitador (, ou ;)
     const headerLine = lines[0];
     const delimiter = (headerLine.match(/;/g) || []).length >= (headerLine.match(/,/g) || []).length ? ';' : ',';
 
@@ -172,7 +169,6 @@ export default function App() {
     reader.onload = (event) => {
       try {
         const buffer = event.target.result;
-        // Limpa Caracteres Iniciais (BOM) que corrompem o header do arquivo Excel
         const text = decodeBuffer(buffer).replace(/^\uFEFF/, '');
         const parsedData = parseCSV(text);
         processData(parsedData);
@@ -181,7 +177,7 @@ export default function App() {
         alert("Ocorreu um erro ao ler a sua planilha. Verifique se ela é um arquivo CSV válido.");
       } finally {
         setIsLoading(false);
-        e.target.value = null; // Reseta o botão para permitir re-upload
+        e.target.value = null; 
       }
     };
     reader.readAsArrayBuffer(file);
@@ -195,7 +191,6 @@ export default function App() {
 
     const headers = Object.keys(rawData[0]);
     
-    // Busca flexível e inteligente pelas colunas principais
     const numFuncCol = headers.find(h => h.toUpperCase().includes('FUNCIONÁRIO') || h.toUpperCase().includes('FUNCIONARIO') || h.toUpperCase().includes('COLABORADORES'));
     const cnpjCol = headers.find(h => h.toUpperCase().includes('CNPJ'));
     const razaoCol = headers.find(h => h.toUpperCase().includes('RAZÃO') || h.toUpperCase().includes('RAZAO'));
@@ -213,7 +208,7 @@ export default function App() {
     }
 
     if (processed.length === 0) {
-      alert("Nenhuma empresa atendeu aos critérios iniciais (ex: eliminar leads com 'Até 04 colaboradores') ou o sistema não identificou as colunas corretamente.");
+      alert("Nenhuma empresa atendeu aos critérios iniciais.");
       return;
     }
 
@@ -266,7 +261,6 @@ export default function App() {
         consultoria: CONSULTORIAS.includes(consultoriaLida) ? consultoriaLida : ''
       };
 
-      // Mapeamento Interno Seguro
       return { 
         ...empresa, 
         score, interesses, isLookalike, curadoriaReason, cnpj_key,
@@ -295,7 +289,6 @@ export default function App() {
     });
   };
 
-  // --- Funções de Ação em Massa ---
   const toggleSelection = (cnpj) => {
     setSelectedLeads(prev => prev.includes(cnpj) ? prev.filter(id => id !== cnpj) : [...prev, cnpj]);
   };
@@ -320,7 +313,6 @@ export default function App() {
     setBulkStatus('');
   };
 
-  // --- Lógica de Filtros ---
   const filteredData = useMemo(() => {
     return data.filter(emp => {
       const crm = getCrmData(emp.cnpj_key);
@@ -358,7 +350,6 @@ export default function App() {
 
   const maxFunnelValue = Math.max(...funnelData.map(d => d.Quantidade), 1);
 
-  // --- Exportações ---
   const generateCSV = (dataToExport, fileName) => {
     if (dataToExport.length === 0) return;
     const baseHeaders = Object.keys(dataToExport[0]).filter(k => 
@@ -398,7 +389,7 @@ export default function App() {
   // --- Telas de Carregamento e Vazio ---
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
         <div className="flex flex-col items-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
           <p className="text-slate-600 font-medium">Carregando Painel CRM...</p>
@@ -409,7 +400,7 @@ export default function App() {
 
   if (data.length === 0) {
     return (
-      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 w-full">
         <div className="bg-white p-8 md:p-10 rounded-2xl shadow-xl max-w-2xl w-full text-center border border-slate-100">
           <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <Zap size={40} />
@@ -429,7 +420,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32 overflow-x-hidden w-full relative">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32 w-full relative">
       
       {/* HEADER PRINCIPAL */}
       <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 w-full">
@@ -441,15 +432,15 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-wrap justify-center gap-2 w-full md:w-auto">
-          <button onClick={exportFiltered} className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0">
+          <button onClick={exportFiltered} className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0 border border-slate-600">
             <Download size={16} className="mr-1.5 md:mr-2" />
             <span className="hidden sm:inline">Exportar</span> Visão
           </button>
-          <button onClick={exportFullDatabase} className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0">
+          <button onClick={exportFullDatabase} className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0 border border-green-400">
             <Save size={16} className="mr-1.5 md:mr-2" />
             <span className="hidden sm:inline">Salvar</span> Base
           </button>
-          <button onClick={clearLocalData} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0">
+          <button onClick={clearLocalData} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0 border border-red-400">
             <Trash2 size={16} className="sm:mr-1.5" />
             <span className="hidden sm:inline">Resetar</span>
           </button>
@@ -510,7 +501,7 @@ export default function App() {
                 <button 
                   key={stage.name} 
                   onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)} 
-                  className="flex flex-col group w-full text-left outline-none cursor-pointer"
+                  className="flex flex-col group w-full text-left outline-none cursor-pointer border-0 bg-transparent p-0"
                 >
                   <div className="flex items-center text-xs font-medium text-slate-500 mb-0.5 ml-1 sm:hidden">{stage.name}</div>
                   <div 
@@ -615,12 +606,12 @@ export default function App() {
           </div>
           
           {viewMode === 'table' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full block">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full">
               <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap min-w-[900px]">
                 <thead className="text-xs text-slate-700 uppercase bg-slate-100 border-b border-slate-200">
                   <tr>
-                    <th className="px-3 md:px-4 py-3 md:py-4 w-12 text-center sticky left-0 z-20 bg-slate-100 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.1)]">
-                      <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors p-1 outline-none cursor-pointer">
+                    <th className="px-3 md:px-4 py-3 md:py-4 w-12 text-center sticky left-0 z-20 bg-slate-100 border-r border-slate-200">
+                      <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors p-1 outline-none cursor-pointer border-0 bg-transparent">
                         {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
                       </button>
                     </th>
@@ -643,8 +634,8 @@ export default function App() {
 
                     return (
                       <tr key={emp.cnpj_key} className={`border-b transition-colors group ${rowClass}`}>
-                        <td className={`px-3 md:px-4 py-3 text-center sticky left-0 z-10 border-r border-slate-200 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] ${stickyColBg}`}>
-                          <button onClick={() => toggleSelection(emp.cnpj_key)} className={`p-1 outline-none cursor-pointer ${isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}`}>
+                        <td className={`px-3 md:px-4 py-3 text-center sticky left-0 z-10 border-r border-slate-200 shadow-sm ${stickyColBg}`}>
+                          <button onClick={() => toggleSelection(emp.cnpj_key)} className={`p-1 outline-none cursor-pointer border-0 bg-transparent ${isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}`}>
                             {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
                           </button>
                         </td>
@@ -702,7 +693,7 @@ export default function App() {
 
                 return (
                   <div key={emp.cnpj_key} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col relative transition-all ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1 shadow-md' : 'border-slate-200 hover:shadow-md'}`}>
-                    <button onClick={() => toggleSelection(emp.cnpj_key)} className={`absolute top-3 left-3 z-10 p-1 bg-white rounded shadow-sm outline-none cursor-pointer ${isSelected ? 'text-indigo-600' : 'text-slate-300'}`}>
+                    <button onClick={() => toggleSelection(emp.cnpj_key)} className={`absolute top-3 left-3 z-10 p-1 bg-white rounded shadow-sm outline-none cursor-pointer border-0 ${isSelected ? 'text-indigo-600' : 'text-slate-300'}`}>
                       {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
                     </button>
                     <div className={`p-4 pl-12 border-b border-white/50 flex justify-between items-start ${scoreData.bg}`}>
@@ -752,11 +743,11 @@ export default function App() {
 
       {/* BARRA FIXA DE AÇÃO EM MASSA */}
       {selectedLeads.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] md:w-auto bg-indigo-600 text-white p-4 rounded-xl shadow-[0_10px_40px_-10px_rgba(79,70,229,0.7)] flex flex-col md:flex-row items-center justify-between animate-in slide-in-from-bottom-8 z-[100] border-2 border-indigo-400/50">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] md:w-auto bg-indigo-600 text-white p-4 rounded-xl shadow-2xl flex flex-col md:flex-row items-center justify-between z-50 border border-indigo-400/50">
           <div className="flex flex-col sm:flex-row items-center mb-3 md:mb-0 w-full md:w-auto text-center md:text-left md:mr-6">
             <div className="flex items-center justify-center md:justify-start">
               <CheckSquare size={20} className="mr-2 text-indigo-200 shrink-0" />
-              <span className="font-bold text-base whitespace-nowrap">{selectedLeads.length} empresas selecionadas</span>
+              <span className="font-bold text-base whitespace-nowrap">{selectedLeads.length} selecionadas</span>
             </div>
           </div>
           <div className="flex items-center w-full md:w-auto space-x-2 md:space-x-3">
@@ -764,7 +755,7 @@ export default function App() {
               <option value="">Mover para status...</option>
               {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
             </select>
-            <button onClick={applyBulkAction} disabled={!bulkStatus} className="bg-white text-indigo-600 px-4 md:px-5 py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-11 shrink-0 cursor-pointer outline-none">
+            <button onClick={applyBulkAction} disabled={!bulkStatus} className="bg-white text-indigo-600 px-4 md:px-5 py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-11 shrink-0 cursor-pointer outline-none border-0">
               Aplicar <ArrowRightCircle size={18} className="ml-1.5 hidden sm:block"/>
             </button>
           </div>
