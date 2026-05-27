@@ -3,12 +3,9 @@ import {
   Upload, Search, MapPin, User, Mail, Phone, 
   Download, BarChart2, Briefcase, Filter,
   LayoutGrid, List, Info, CheckSquare, Square, 
-  ArrowRightCircle, CheckCircle2, Zap,
-  Building, Target, ThermometerSun, XCircle, Save, Lightbulb, Trash2, RefreshCw
+  ArrowRightCircle, Target, ThermometerSun, 
+  XCircle, Save, Lightbulb, Trash2, Zap, Building
 } from 'lucide-react';
-import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
-} from 'recharts';
 
 // --- Constantes e Configurações ---
 const CONSULTORIAS = [
@@ -38,13 +35,13 @@ const TERMOMETRO_CORES = {
 };
 
 const FUNNEL_COLORS = {
-  'Não Contactado': { bg: 'bg-slate-200', text: 'text-slate-700', hover: 'hover:bg-slate-300', hex: '#e2e8f0' },
-  'Em Contato': { bg: 'bg-blue-200', text: 'text-blue-800', hover: 'hover:bg-blue-300', hex: '#bfdbfe' },
-  'Apresentação/Mesa': { bg: 'bg-yellow-200', text: 'text-yellow-800', hover: 'hover:bg-yellow-300', hex: '#fef08a' },
-  'Negociação': { bg: 'bg-orange-200', text: 'text-orange-800', hover: 'hover:bg-orange-300', hex: '#fed7aa' },
-  'Proposta Emitida': { bg: 'bg-purple-200', text: 'text-purple-800', hover: 'hover:bg-purple-300', hex: '#e9d5ff' },
-  'Contrato Fechado': { bg: 'bg-green-300', text: 'text-green-900', hover: 'hover:bg-green-400', hex: '#86efac' },
-  'Perdido': { bg: 'bg-red-200', text: 'text-red-800', hover: 'hover:bg-red-300', hex: '#fecaca' }
+  'Não Contactado': { bg: 'bg-slate-200', text: 'text-slate-700', hover: 'hover:bg-slate-300' },
+  'Em Contato': { bg: 'bg-blue-200', text: 'text-blue-800', hover: 'hover:bg-blue-300' },
+  'Apresentação/Mesa': { bg: 'bg-yellow-200', text: 'text-yellow-800', hover: 'hover:bg-yellow-300' },
+  'Negociação': { bg: 'bg-orange-200', text: 'text-orange-800', hover: 'hover:bg-orange-300' },
+  'Proposta Emitida': { bg: 'bg-purple-200', text: 'text-purple-800', hover: 'hover:bg-purple-300' },
+  'Contrato Fechado': { bg: 'bg-green-300', text: 'text-green-900', hover: 'hover:bg-green-400' },
+  'Perdido': { bg: 'bg-red-200', text: 'text-red-800', hover: 'hover:bg-red-300' }
 };
 
 export default function App() {
@@ -53,53 +50,103 @@ export default function App() {
   const [viewMode, setViewMode] = useState('table');
   const [isLoading, setIsLoading] = useState(true);
   
-  // Estados de Filtro
   const [filterCidade, setFilterCidade] = useState('');
   const [filterPorte, setFilterPorte] = useState('');
   const [filterInteresseMinimo, setFilterInteresseMinimo] = useState(0);
   const [filterStatus, setFilterStatus] = useState('Todos');
   const [filterInteresseEspecifico, setFilterInteresseEspecifico] = useState('Todos');
 
-  // Estados de Seleção em Massa
   const [selectedLeads, setSelectedLeads] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('');
 
-  // --- Auto-Load Seguro para GitHub Pages com LocalStorage ---
-  useEffect(() => {
-    // 1. Tenta carregar os dados salvos localmente no navegador primeiro (Evita perda de dados ao dar F5)
-    const localData = localStorage.getItem('crm_data');
-    const localCrmState = localStorage.getItem('crm_state');
+  // --- Função Avançada para Decodificar Acentos Brasileiros ---
+  const decodeBuffer = (buffer) => {
+    let decoderUtf8 = new TextDecoder('utf-8');
+    let text = decoderUtf8.decode(buffer);
+    // Se conter o caractere de erro padrão, a planilha provavelmente foi salva no formato Excel padrão (Windows-1252)
+    if (text.includes('')) {
+      let decoderWin = new TextDecoder('windows-1252');
+      text = decoderWin.decode(buffer);
+    }
+    return text;
+  };
 
-    if (localData && localCrmState) {
-      try {
+  // --- Parser Robusto de CSV (Ignora ponto-e-vírgula dentro de textos) ---
+  const parseCSVLine = (str) => {
+    const result = [];
+    let current = '';
+    let inQuotes = false;
+    for (let i = 0; i < str.length; i++) {
+      const char = str[i];
+      if (char === '"' && str[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === ';' && !inQuotes) {
+        result.push(current.trim());
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    result.push(current.trim());
+    return result;
+  };
+
+  const parseCSV = (text) => {
+    const lines = text.split(/\r?\n/);
+    if (lines.length === 0) return [];
+    
+    const headers = parseCSVLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+    const parsedData = [];
+    
+    for (let i = 1; i < lines.length; i++) {
+      if (!lines[i].trim()) continue;
+      const values = parseCSVLine(lines[i]);
+      const obj = {};
+      headers.forEach((h, index) => {
+        let val = values[index] || '';
+        if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
+        obj[h] = val.trim();
+      });
+      parsedData.push(obj);
+    }
+    return parsedData;
+  };
+
+  // --- Inicialização (GitHub Pages / LocalStorage) ---
+  useEffect(() => {
+    try {
+      const localData = localStorage.getItem('crm_data');
+      const localCrmState = localStorage.getItem('crm_state');
+
+      if (localData && localCrmState) {
         setData(JSON.parse(localData));
         setCrmState(JSON.parse(localCrmState));
         setIsLoading(false);
-        return; // Sai do useEffect se carregou com sucesso
-      } catch (e) {
-        console.error("Erro ao ler LocalStorage", e);
+        return; 
       }
-    }
+    } catch (e) { console.error("Erro no cache", e); }
 
-    // 2. Se não tem dados locais, tenta puxar do servidor (GitHub Pages)
-    // Usando caminho relativo simples que funciona melhor em repositórios do GitHub Pages
-    fetch('data.csv')
+    // Utiliza fetch com arrayBuffer para prevenir problemas de codificação no GitHub Pages
+    fetch('./data.csv')
       .then(response => {
-        if (!response.ok) throw new Error('Arquivo data.csv não encontrado no servidor');
-        return response.text();
+        if (!response.ok) throw new Error('data.csv ausente');
+        return response.arrayBuffer();
       })
-      .then(text => {
+      .then(buffer => {
+        const text = decodeBuffer(buffer);
         const parsedData = parseCSV(text);
         processData(parsedData);
         setIsLoading(false);
       })
       .catch(err => {
-        console.log('Sem base online. Aguardando upload manual.', err);
+        console.log('Nenhuma base remota. Acesso manual iniciado.');
         setIsLoading(false);
       });
   }, []);
 
-  // --- Sincronizar alterações com LocalStorage automaticamente ---
   useEffect(() => {
     if (data.length > 0) {
       localStorage.setItem('crm_data', JSON.stringify(data));
@@ -107,33 +154,13 @@ export default function App() {
     }
   }, [data, crmState]);
 
-  // Função para resetar e carregar nova base
   const clearLocalData = () => {
-    if(window.confirm("Isso apagará o seu progresso local atual e solicitará uma nova planilha. Tem certeza?")) {
+    if(window.confirm("Isso apagará o seu progresso local e solicitará uma nova planilha. Tem certeza?")) {
       localStorage.removeItem('crm_data');
       localStorage.removeItem('crm_state');
       setData([]);
       setCrmState({});
     }
-  };
-
-  // --- Processamento de CSV ---
-  const parseCSV = (text) => {
-    const lines = text.split('\n');
-    const headers = lines[0].split(';').map(h => h.trim().replace(/\r/g, ''));
-    const parsedData = [];
-    for (let i = 1; i < lines.length; i++) {
-      if (!lines[i].trim()) continue;
-      const values = lines[i].split(';'); 
-      const obj = {};
-      headers.forEach((h, index) => {
-        let val = values[index] ? values[index].trim().replace(/\r/g, '') : '';
-        if (val.startsWith('"') && val.endsWith('"')) val = val.slice(1, -1);
-        obj[h] = val;
-      });
-      parsedData.push(obj);
-    }
-    return parsedData;
   };
 
   const handleFileUpload = (e) => {
@@ -143,12 +170,13 @@ export default function App() {
     setIsLoading(true);
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target.result;
+      const buffer = event.target.result;
+      const text = decodeBuffer(buffer);
       const parsedData = parseCSV(text);
       processData(parsedData);
       setIsLoading(false);
     };
-    reader.readAsText(file, 'UTF-8');
+    reader.readAsArrayBuffer(file); // Lê como buffer para tratar acentos brasileiros
   };
 
   const processData = (rawData) => {
@@ -156,14 +184,10 @@ export default function App() {
       d['NÚMERO DE FUNCIONÁRIOS'] && d['NÚMERO DE FUNCIONÁRIOS'] !== 'Até 04 colaboradores'
     );
 
-    // Mapeamento de Força do Perfil (Curadoria Inteligente)
     const profileStrength = {};
-    
     processed.forEach(empresa => {
       let explicitScore = 0;
-      CONSULTORIAS.forEach(cons => {
-        if (empresa[cons] === 'Sim') explicitScore += 1;
-      });
+      CONSULTORIAS.forEach(cons => { if (empresa[cons] === 'Sim') explicitScore += 1; });
       empresa.explicitScore = explicitScore;
 
       if (explicitScore > 0) {
@@ -180,28 +204,19 @@ export default function App() {
       let curadoriaReason = '';
       
       let interesses = [];
-      CONSULTORIAS.forEach(cons => {
-        if (empresa[cons] === 'Sim') interesses.push(cons);
-      });
+      CONSULTORIAS.forEach(cons => { if (empresa[cons] === 'Sim') interesses.push(cons); });
       
-      // Avaliação de sósias
       if (score === 0) {
         const key = `${empresa['CIDADE']}|${empresa['PORTE']}|${empresa['SETOR']}`;
         const strength = profileStrength[key] || 0;
         
-        if (strength >= 10) {
-          score = 3; isLookalike = true; curadoriaReason = 'Alta conversão neste Perfil na sua base';
-        } else if (strength >= 5) {
-          score = 2; isLookalike = true; curadoriaReason = 'Boa conversão neste Perfil na sua base';
-        } else if (strength >= 2) {
-          score = 1; isLookalike = true; curadoriaReason = 'Alguma conversão neste Perfil na sua base';
-        } else if (strength === 1) {
-          score = 0.5; isLookalike = true; curadoriaReason = 'Perfil Semelhante a pelo menos 1 lead';
-        }
+        if (strength >= 10) { score = 3; isLookalike = true; curadoriaReason = 'Alta conversão neste Perfil'; } 
+        else if (strength >= 5) { score = 2; isLookalike = true; curadoriaReason = 'Boa conversão neste Perfil'; } 
+        else if (strength >= 2) { score = 1; isLookalike = true; curadoriaReason = 'Alguma conversão neste Perfil'; } 
+        else if (strength === 1) { score = 0.5; isLookalike = true; curadoriaReason = 'Perfil Semelhante a leads'; }
       }
 
       const cnpj_key = empresa['CNPJ'] ? `${empresa['CNPJ']}-${idx}` : `fallback-id-${idx}`;
-
       const statusLido = empresa['Status da Negociação'] || 'Não Contactado';
       const consultoriaLida = empresa['Consultoria Foco'] || '';
 
@@ -210,14 +225,7 @@ export default function App() {
         consultoria: CONSULTORIAS.includes(consultoriaLida) ? consultoriaLida : ''
       };
 
-      return {
-        ...empresa,
-        score,
-        interesses,
-        isLookalike,
-        curadoriaReason,
-        cnpj_key
-      };
+      return { ...empresa, score, interesses, isLookalike, curadoriaReason, cnpj_key };
     });
 
     processed.sort((a, b) => b.score - a.score);
@@ -225,45 +233,30 @@ export default function App() {
     setCrmState(initialCrmState);
   };
 
-  // --- Ações de CRM ---
   const getCrmData = (cnpj) => crmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
 
   const updateCrm = (cnpj, field, value) => {
-    setCrmState(prev => ({
-      ...prev,
-      [cnpj]: { ...getCrmData(cnpj), [field]: value }
-    }));
+    setCrmState(prev => ({ ...prev, [cnpj]: { ...getCrmData(cnpj), [field]: value } }));
   };
 
-  // --- Ações em Massa (Bulk) ---
   const toggleSelection = (cnpj) => {
-    setSelectedLeads(prev => 
-      prev.includes(cnpj) ? prev.filter(id => id !== cnpj) : [...prev, cnpj]
-    );
+    setSelectedLeads(prev => prev.includes(cnpj) ? prev.filter(id => id !== cnpj) : [...prev, cnpj]);
   };
 
   const toggleAll = () => {
-    if (selectedLeads.length === filteredData.length) {
-      setSelectedLeads([]);
-    } else {
-      setSelectedLeads(filteredData.map(d => d.cnpj_key));
-    }
+    if (selectedLeads.length === filteredData.length) setSelectedLeads([]);
+    else setSelectedLeads(filteredData.map(d => d.cnpj_key));
   };
 
   const applyBulkAction = () => {
     if (!bulkStatus || selectedLeads.length === 0) return;
-    
     const newCrmState = { ...crmState };
-    selectedLeads.forEach(cnpj => {
-      newCrmState[cnpj] = { ...getCrmData(cnpj), status: bulkStatus };
-    });
-    
+    selectedLeads.forEach(cnpj => { newCrmState[cnpj] = { ...getCrmData(cnpj), status: bulkStatus }; });
     setCrmState(newCrmState);
     setSelectedLeads([]); 
     setBulkStatus('');
   };
 
-  // --- Filtros Dinâmicos ---
   const filteredData = useMemo(() => {
     return data.filter(emp => {
       const crm = getCrmData(emp.cnpj_key);
@@ -273,11 +266,8 @@ export default function App() {
       const matchStatus = filterStatus !== 'Todos' ? crm.status === filterStatus : true;
       
       let matchInteresseEspecifico = true;
-      if (filterInteresseEspecifico === 'Nenhum') {
-        matchInteresseEspecifico = emp.interesses.length === 0;
-      } else if (filterInteresseEspecifico !== 'Todos') {
-        matchInteresseEspecifico = emp.interesses.includes(filterInteresseEspecifico);
-      }
+      if (filterInteresseEspecifico === 'Nenhum') matchInteresseEspecifico = emp.interesses.length === 0;
+      else if (filterInteresseEspecifico !== 'Todos') matchInteresseEspecifico = emp.interesses.includes(filterInteresseEspecifico);
 
       return matchCidade && matchPorte && matchInteresse && matchStatus && matchInteresseEspecifico;
     });
@@ -286,11 +276,8 @@ export default function App() {
   const isFilterActive = filterCidade !== '' || filterPorte !== '' || filterInteresseMinimo > 0 || filterStatus !== 'Todos' || filterInteresseEspecifico !== 'Todos';
 
   const resetFilters = () => {
-    setFilterCidade('');
-    setFilterPorte('');
-    setFilterInteresseMinimo(0);
-    setFilterStatus('Todos');
-    setFilterInteresseEspecifico('Todos');
+    setFilterCidade(''); setFilterPorte(''); setFilterInteresseMinimo(0);
+    setFilterStatus('Todos'); setFilterInteresseEspecifico('Todos');
   };
 
   const cidadesUnicas = [...new Set(data.map(d => d['CIDADE']).filter(Boolean))].sort();
@@ -304,7 +291,6 @@ export default function App() {
 
   const maxFunnelValue = Math.max(...funnelData.map(d => d.Quantidade), 1);
 
-  // --- Exportações ---
   const generateCSV = (dataToExport, fileName) => {
     if (dataToExport.length === 0) return;
     const baseHeaders = Object.keys(dataToExport[0]).filter(k => 
@@ -324,7 +310,6 @@ export default function App() {
     });
 
     const csvContent = [headers.join(';'), ...rows].join('\n');
-    // Força o encoding UTF-8 com BOM para abrir certinho no Excel
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -336,15 +321,12 @@ export default function App() {
   };
 
   const exportFiltered = () => {
-    const dataToExport = selectedLeads.length > 0 
-      ? filteredData.filter(emp => selectedLeads.includes(emp.cnpj_key)) 
-      : filteredData;
+    const dataToExport = selectedLeads.length > 0 ? filteredData.filter(emp => selectedLeads.includes(emp.cnpj_key)) : filteredData;
     generateCSV(dataToExport, `Acoes_Mercado_${dataToExport.length}_leads.csv`);
   };
   
   const exportFullDatabase = () => generateCSV(data, 'data.csv');
 
-  // --- Telas ---
   if (isLoading) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -379,7 +361,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 overflow-x-hidden w-full">
-      {/* HEADER PRINCIPAL RESPONSIVO */}
       <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 w-full">
         <div className="flex items-center space-x-3 w-full md:w-auto justify-center md:justify-start">
           <Briefcase className="text-blue-400 shrink-0" size={28} />
@@ -389,27 +370,15 @@ export default function App() {
           </div>
         </div>
         <div className="flex flex-wrap justify-center gap-2 w-full md:w-auto">
-          <button 
-            onClick={exportFiltered}
-            className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0"
-            title="Exportar seleção atual de empresas"
-          >
+          <button onClick={exportFiltered} className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0">
             <Download size={16} className="mr-1.5 md:mr-2" />
             <span className="hidden sm:inline">Exportar</span> Visão
           </button>
-          <button 
-            onClick={exportFullDatabase}
-            className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0"
-            title="Baixe toda a base para subir no GitHub e atualizar o repositório"
-          >
+          <button onClick={exportFullDatabase} className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0">
             <Save size={16} className="mr-1.5 md:mr-2" />
-            <span className="hidden sm:inline">Salvar</span> Base Completa
+            <span className="hidden sm:inline">Salvar</span> Base
           </button>
-          <button 
-            onClick={clearLocalData}
-            className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0"
-            title="Apaga os dados salvos no seu navegador para carregar uma nova base"
-          >
+          <button onClick={clearLocalData} className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0">
             <Trash2 size={16} className="sm:mr-1.5" />
             <span className="hidden sm:inline">Limpar Cache</span>
           </button>
@@ -417,28 +386,23 @@ export default function App() {
       </header>
 
       <main className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 w-full">
-        
-        {/* PARÁGRAFO INTRODUTÓRIO */}
         <div className="bg-white rounded-xl p-5 md:p-6 shadow-sm border border-slate-200">
           <h2 className="text-lg md:text-xl font-extrabold text-slate-800 mb-2">Bem-vindo ao seu Mapa de Oportunidades 🚀</h2>
           <p className="text-slate-600 text-sm md:text-base leading-relaxed">
-            Esta ferramenta cruza os dados do seu mercado com o nível de interesse demonstrado nas consultorias. Seus dados estão sendo salvos localmente neste navegador, mas lembre-se de <b>"Salvar a Base Completa"</b> e atualizar o <code>data.csv</code> no GitHub para compartilhar o progresso com o time.
+            Seus dados estão sendo salvos localmente neste navegador. Lembre-se de <b>"Salvar a Base"</b> e atualizar o <code>data.csv</code> no GitHub para compartilhar o progresso da tabela.
           </p>
         </div>
 
-        {/* INSTRUÇÕES E LEGENDAS */}
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between shadow-sm">
           <div className="flex-1 w-full">
             <h2 className="text-blue-800 font-bold flex items-center text-sm mb-1">
               <Lightbulb size={18} className="mr-1.5 text-yellow-500"/> Sósias Inteligentes (Lookalike)
             </h2>
             <p className="text-xs text-slate-600 leading-relaxed">
-              Empresas "Frias" que possuem a <b>mesma Localidade, Porte e Setor</b> de empresas que já demonstraram interesse são promovidas para <span className="font-bold text-emerald-600">🎯 Potencial</span>.
+              Empresas "Frias" que possuem a mesma <b>Localidade, Porte e Setor</b> de leads interessados, recebem o status de <span className="font-bold text-emerald-600">🎯 Potencial</span>.
             </p>
           </div>
-          
           <div className="hidden lg:block w-px h-12 bg-blue-200 mx-4"></div>
-          
           <div className="flex-1 flex flex-col w-full">
             <span className="text-xs font-semibold text-slate-500 mb-2">Termômetro de Interesse:</span>
             <div className="flex flex-wrap gap-1.5 md:gap-2">
@@ -451,17 +415,13 @@ export default function App() {
           </div>
         </div>
 
-        {/* FUNIL DINÂMICO E INTERATIVO */}
         <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
-            <div>
-              <h2 className="text-lg font-bold flex items-center text-slate-700">
-                <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline Geral de Vendas
-              </h2>
-            </div>
+            <h2 className="text-lg font-bold flex items-center text-slate-700">
+              <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline Geral de Vendas
+            </h2>
             <span className="mt-2 sm:mt-0 text-[11px] font-semibold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
-              <Info size={14} className="mr-1 shrink-0" />
-              Clique em uma barra para filtrar
+              <Info size={14} className="mr-1 shrink-0" /> Clique nas etapas para filtrar
             </span>
           </div>
           
@@ -472,22 +432,9 @@ export default function App() {
               const isActiveFilter = filterStatus === stage.name;
               
               return (
-                <div 
-                  key={stage.name} 
-                  onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)}
-                  className="flex flex-col group cursor-pointer w-full"
-                >
-                  <div className="flex items-center text-xs font-medium text-slate-500 mb-1 ml-1 sm:hidden">
-                    {stage.name}
-                  </div>
-                  <div 
-                    style={{ width: `${widthPercent}%` }}
-                    className={`
-                      relative h-12 sm:h-10 rounded-r-xl rounded-l-md flex items-center justify-between px-3 transition-all duration-300 ease-out border border-white/50
-                      ${config.bg} ${config.text} ${config.hover}
-                      ${isActiveFilter ? 'ring-2 ring-offset-1 ring-blue-400 shadow-md z-10' : 'shadow-sm'}
-                    `}
-                  >
+                <div key={stage.name} onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)} className="flex flex-col group cursor-pointer w-full">
+                  <div className="flex items-center text-xs font-medium text-slate-500 mb-1 ml-1 sm:hidden">{stage.name}</div>
+                  <div style={{ width: `${widthPercent}%` }} className={`relative h-12 sm:h-10 rounded-r-xl rounded-l-md flex items-center justify-between px-3 transition-all duration-300 ease-out border border-white/50 ${config.bg} ${config.text} ${config.hover} ${isActiveFilter ? 'ring-2 ring-offset-1 ring-blue-400 shadow-md z-10' : 'shadow-sm'}`}>
                     <span className="font-semibold text-xs sm:text-sm truncate pr-2 hidden sm:block">{stage.name}</span>
                     <span className="font-black text-sm sm:text-lg">{stage.Quantidade}</span>
                   </div>
@@ -497,15 +444,9 @@ export default function App() {
           </div>
         </div>
 
-        {/* CONTROLES E FILTROS */}
         <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
-          
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-5 border-b border-slate-100 pb-4">
-            <div>
-              <h3 className="font-bold text-slate-800 text-lg flex items-center">
-                <Filter size={20} className="text-blue-500 mr-2" /> Refine sua Busca
-              </h3>
-            </div>
+            <h3 className="font-bold text-slate-800 text-lg flex items-center"><Filter size={20} className="text-blue-500 mr-2" /> Refine sua Busca</h3>
             {isFilterActive && (
               <button onClick={resetFilters} className="mt-3 sm:mt-0 text-sm flex items-center text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg font-semibold transition-colors border border-red-100">
                 <XCircle size={16} className="mr-1.5" /> Limpar Filtros
@@ -515,39 +456,28 @@ export default function App() {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 w-full">
             <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
-                <MapPin size={16} className="mr-1.5 text-slate-400 shrink-0"/> Localidade
-              </label>
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><MapPin size={16} className="mr-1.5 text-slate-400 shrink-0"/> Localidade</label>
               <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterCidade} onChange={(e) => setFilterCidade(e.target.value)}>
                 <option value="">Todas as Cidades</option>
                 {cidadesUnicas.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
-
             <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
-                <Building size={16} className="mr-1.5 text-slate-400 shrink-0"/> Porte
-              </label>
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Building size={16} className="mr-1.5 text-slate-400 shrink-0"/> Porte</label>
               <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterPorte} onChange={(e) => setFilterPorte(e.target.value)}>
                 <option value="">Todos os Portes</option>
                 {portesUnicos.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
-
             <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
-                <Target size={16} className="mr-1.5 text-slate-400 shrink-0"/> Status
-              </label>
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Target size={16} className="mr-1.5 text-slate-400 shrink-0"/> Status</label>
               <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="Todos">Visualizando Todos</option>
                 {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
-
             <div className="flex flex-col min-w-0">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
-                <Zap size={16} className="mr-1.5 text-slate-400 shrink-0"/> Interesse Específico
-              </label>
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate"><Zap size={16} className="mr-1.5 text-slate-400 shrink-0"/> Interesse Específico</label>
               <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterInteresseEspecifico} onChange={(e) => setFilterInteresseEspecifico(e.target.value)}>
                 <option value="Todos">Qualquer</option>
                 {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
@@ -557,9 +487,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-col border-t border-slate-100 pt-4">
-            <label className="text-sm font-bold text-slate-700 flex items-center mb-2">
-              <ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Interesse Mínimo (Temperatura de corte)
-            </label>
+            <label className="text-sm font-bold text-slate-700 flex items-center mb-2"><ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Interesse Mínimo (Temperatura de corte)</label>
             <div className="grid grid-cols-3 sm:flex sm:flex-nowrap gap-2 w-full">
               {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => {
                 const numericScore = Number(score);
@@ -567,19 +495,9 @@ export default function App() {
                 const isIncluded = numericScore >= filterInteresseMinimo; 
                 
                 return (
-                  <button 
-                    key={score}
-                    onClick={() => setFilterInteresseMinimo(numericScore)}
-                    className={`flex-1 py-2 px-1 rounded-xl border text-[10px] sm:text-xs md:text-sm transition-all flex flex-col items-center justify-center gap-1 min-w-[50px]
-                      ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 z-10' : 
-                        isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60 grayscale'
-                      }
-                    `}
-                  >
+                  <button key={score} onClick={() => setFilterInteresseMinimo(numericScore)} className={`flex-1 py-2 px-1 rounded-xl border text-[10px] sm:text-xs md:text-sm transition-all flex flex-col items-center justify-center gap-1 min-w-[50px] ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 z-10' : isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60 grayscale'}`}>
                     <span className="text-lg sm:text-xl mb-0.5">{config.icon}</span>
-                    <span className={`font-bold text-center leading-tight truncate w-full px-1 ${isIncluded ? config.color : 'text-slate-400'}`}>
-                      {config.label}
-                    </span>
+                    <span className={`font-bold text-center leading-tight truncate w-full px-1 ${isIncluded ? config.color : 'text-slate-400'}`}>{config.label}</span>
                   </button>
                 )
               })}
@@ -587,7 +505,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* BULK ACTION BAR (MÚLTIPLAS SELEÇÕES) */}
         {selectedLeads.length > 0 && (
           <div className="bg-indigo-600 text-white p-3 md:p-4 rounded-xl shadow-xl flex flex-col md:flex-row items-center justify-between animate-in slide-in-from-bottom-4 sticky top-20 z-40 border border-indigo-400/50 mx-auto w-full max-w-[calc(100vw-32px)] md:max-w-full">
             <div className="flex flex-col sm:flex-row items-center mb-3 md:mb-0 w-full md:w-auto text-center md:text-left">
@@ -597,52 +514,37 @@ export default function App() {
               </div>
             </div>
             <div className="flex items-center w-full md:w-auto space-x-2">
-              <select 
-                className="flex-1 md:w-48 border-none rounded-lg p-2 text-xs md:text-sm text-slate-800 font-medium shadow-inner outline-none h-10 min-w-0"
-                value={bulkStatus}
-                onChange={(e) => setBulkStatus(e.target.value)}
-              >
+              <select className="flex-1 md:w-48 border-none rounded-lg p-2 text-xs md:text-sm text-slate-800 font-medium shadow-inner outline-none h-10 min-w-0" value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)}>
                 <option value="">Novo status...</option>
                 {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
-              <button 
-                onClick={applyBulkAction}
-                disabled={!bulkStatus}
-                className="bg-white text-indigo-600 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-10 shrink-0"
-              >
+              <button onClick={applyBulkAction} disabled={!bulkStatus} className="bg-white text-indigo-600 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-10 shrink-0">
                 Aplicar <ArrowRightCircle size={16} className="ml-1 hidden sm:block"/>
               </button>
             </div>
           </div>
         )}
 
-        {/* LISTAGEM DE DADOS */}
         <div className="w-full">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
             <div className="flex items-center w-full md:w-auto">
               <h2 className="text-lg font-bold text-slate-800 flex items-center">
-                Mesa de Atuação 
-                <span className="ml-2 bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded-full">{filteredData.length} leads</span>
+                Mesa de Atuação <span className="ml-2 bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded-full">{filteredData.length} leads</span>
               </h2>
             </div>
             
             <div className="flex bg-slate-200 rounded-lg p-1 w-full md:w-auto">
-              <button onClick={() => setViewMode('table')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}>
-                <List size={16} className="mr-1.5" /> Tabela
-              </button>
-              <button onClick={() => setViewMode('cards')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}>
-                <LayoutGrid size={16} className="mr-1.5" /> Cards
-              </button>
+              <button onClick={() => setViewMode('table')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}><List size={16} className="mr-1.5" /> Tabela</button>
+              <button onClick={() => setViewMode('cards')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}><LayoutGrid size={16} className="mr-1.5" /> Cards</button>
             </div>
           </div>
           
-          {/* TABELA RESPONSIVA */}
           {viewMode === 'table' && (
             <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full block">
               <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap">
                 <thead className="text-xs text-slate-700 uppercase bg-slate-100 border-b border-slate-200">
                   <tr>
-                    <th className="px-3 md:px-4 py-3 md:py-4 w-10 md:w-12 text-center sticky left-0 bg-slate-100 z-10" title="Selecionar todos">
+                    <th className="px-3 md:px-4 py-3 md:py-4 w-10 md:w-12 text-center sticky left-0 z-10 bg-slate-100" title="Selecionar todos">
                       <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors">
                         {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={16}/> : <Square size={16}/>}
                       </button>
@@ -660,11 +562,11 @@ export default function App() {
                     const crm = getCrmData(emp.cnpj_key);
                     const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
                     const isSelected = selectedLeads.includes(emp.cnpj_key);
-                    const rowClass = isSelected ? 'bg-indigo-50/50 border-indigo-100' : 'hover:bg-slate-50 border-slate-100';
+                    const rowClass = isSelected ? 'bg-indigo-50 border-indigo-100' : 'bg-white hover:bg-slate-50 border-slate-100';
 
                     return (
-                      <tr key={emp.cnpj_key} className={`border-b transition-colors ${rowClass}`}>
-                        <td className="px-3 md:px-4 py-3 text-center sticky left-0 z-10 bg-inherit">
+                      <tr key={emp.cnpj_key} className={`border-b transition-colors group ${rowClass}`}>
+                        <td className={`px-3 md:px-4 py-3 text-center sticky left-0 z-10 ${isSelected ? 'bg-indigo-50' : 'bg-white group-hover:bg-slate-50'}`}>
                           <button onClick={() => toggleSelection(emp.cnpj_key)} className={isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}>
                             {isSelected ? <CheckSquare size={16}/> : <Square size={16}/>}
                           </button>
@@ -680,9 +582,7 @@ export default function App() {
                           )}
                         </td>
                         <td className="px-3 md:px-4 py-3 max-w-[150px] md:max-w-[200px]">
-                          <div className="font-bold text-slate-800 truncate" title={emp['RAZÃO SOCIAL']}>
-                            {emp['RAZÃO SOCIAL']}
-                          </div>
+                          <div className="font-bold text-slate-800 truncate" title={emp['RAZÃO SOCIAL']}>{emp['RAZÃO SOCIAL']}</div>
                           <div className="text-xs text-slate-400 mt-0.5 truncate" title={`${emp['CIDADE']} • ${emp['SETOR']}`}>{emp['CIDADE']} • {emp['SETOR']?.substring(0, 15)}</div>
                         </td>
                         <td className="px-3 md:px-4 py-3">
@@ -695,21 +595,12 @@ export default function App() {
                           <div className="text-[10px] md:text-xs text-slate-500 truncate">{emp['TELEFONE'] || '-'}</div>
                         </td>
                         <td className="px-3 md:px-4 py-3">
-                          <select 
-                            className="border border-slate-200 rounded p-1.5 text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[110px] md:w-[140px]"
-                            value={crm.status}
-                            onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}
-                          >
+                          <select className="border border-slate-200 rounded p-1.5 text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[110px] md:w-[140px]" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
                             {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </td>
                         <td className="px-3 md:px-4 py-3">
-                          <select 
-                            className="border border-slate-200 rounded p-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[110px] md:w-[140px]"
-                            value={crm.consultoria}
-                            onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)}
-                            disabled={crm.status === 'Não Contactado'}
-                          >
+                          <select className="border border-slate-200 rounded p-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[110px] md:w-[140px]" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
                             <option value="">Definir Foco...</option>
                             {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
                           </select>
@@ -725,7 +616,6 @@ export default function App() {
             </div>
           )}
 
-          {/* CARDS RESPONSIVOS */}
           {viewMode === 'cards' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 w-full">
               {filteredData.map((emp) => {
@@ -735,11 +625,9 @@ export default function App() {
 
                 return (
                   <div key={emp.cnpj_key} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col relative transition-all ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1' : 'border-slate-200 hover:shadow-md'}`}>
-                    
                     <button onClick={() => toggleSelection(emp.cnpj_key)} className={`absolute top-3 left-3 z-10 p-0.5 bg-white rounded shadow-sm ${isSelected ? 'text-indigo-600' : 'text-slate-300'}`}>
                       {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
                     </button>
-
                     <div className={`p-3 md:p-4 pl-10 md:pl-12 border-b border-white/50 flex justify-between items-start ${scoreData.bg}`}>
                       <div className="flex-1 pr-2 min-w-0">
                         <h3 className="font-bold text-slate-800 text-xs md:text-sm leading-tight truncate mb-1" title={emp['RAZÃO SOCIAL']}>{emp['RAZÃO SOCIAL']}</h3>
@@ -756,14 +644,12 @@ export default function App() {
                         )}
                       </div>
                     </div>
-
                     <div className="p-3 md:p-4 space-y-2 flex-1 text-xs md:text-sm text-slate-600">
                       <div className="flex items-start"><User size={14} className="mr-1.5 md:mr-2 text-slate-400 mt-1 shrink-0" /><span className="truncate">{emp['NOME'] || 'Sem contato'}</span></div>
                       <div className="flex items-center"><Phone size={14} className="mr-1.5 md:mr-2 text-slate-400 shrink-0" /><span>{emp['TELEFONE'] || '-'}</span></div>
                       <div className="flex items-center" title="Local e Setor"><MapPin size={14} className="mr-1.5 md:mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp['CIDADE']} • {emp['SETOR']?.substring(0, 15)}</span></div>
                       <div className="flex items-center" title="Número de Funcionários"><Building size={14} className="mr-1.5 md:mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp['NÚMERO DE FUNCIONÁRIOS'] || 'N/I'}</span></div>
                     </div>
-
                     <div className="p-3 md:p-4 bg-slate-50 border-t border-slate-100 space-y-2 md:space-y-3">
                       <div>
                         <label className="block text-[10px] md:text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Status CRM</label>
