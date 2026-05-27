@@ -49,6 +49,7 @@ export default function App() {
   const [crmState, setCrmState] = useState({});
   const [viewMode, setViewMode] = useState('table');
   const [isLoading, setIsLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
   
   const [filterCidade, setFilterCidade] = useState('');
   const [filterPorte, setFilterPorte] = useState('');
@@ -61,18 +62,24 @@ export default function App() {
 
   // --- Função Avançada para Decodificar Acentos Brasileiros ---
   const decodeBuffer = (buffer) => {
-    let decoderUtf8 = new TextDecoder('utf-8');
-    let text = decoderUtf8.decode(buffer);
-    if (text.includes('')) {
-      let decoderWin = new TextDecoder('windows-1252');
-      text = decoderWin.decode(buffer);
+    try {
+      let decoderUtf8 = new TextDecoder('utf-8');
+      let text = decoderUtf8.decode(buffer);
+      if (text.includes('')) {
+        let decoderWin = new TextDecoder('windows-1252');
+        text = decoderWin.decode(buffer);
+      }
+      return text;
+    } catch(e) {
+      console.error("Erro na decodificação do buffer", e);
+      return "";
     }
-    return text;
   };
 
-  // --- Parser Auto-Adaptável de CSV ---
+  // --- Parser Auto-Adaptável de CSV (Tolerante a falhas) ---
   const parseCSV = (text) => {
-    const lines = text.split(/\r?\n/).filter(line => line.trim());
+    if (!text) return [];
+    const lines = text.split(/\r?\n/).filter(line => line && line.trim().length > 0);
     if (lines.length === 0) return [];
     
     const headerLine = lines[0];
@@ -98,7 +105,7 @@ export default function App() {
       return result;
     };
 
-    const headers = parseLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+    const headers = parseLine(lines[0]).map(h => h ? h.replace(/^"|"$/g, '').trim() : `col_${Math.random()}`);
     const parsedData = [];
     
     for (let i = 1; i < lines.length; i++) {
@@ -128,7 +135,8 @@ export default function App() {
       }
     } catch (e) { console.error("Erro no cache", e); }
 
-    fetch('./data.csv')
+    // Tentativa de carregar arquivo base no GitHub Pages
+    fetch('data.csv')
       .then(response => {
         if (!response.ok) throw new Error('data.csv ausente');
         return response.arrayBuffer();
@@ -139,15 +147,17 @@ export default function App() {
         processData(parsedData);
       })
       .catch(err => {
-        console.log('Nenhuma base remota. Acesso manual iniciado.');
+        console.log('Nenhuma base remota ou falha de rede. Acesso manual iniciado.', err);
         setIsLoading(false);
       });
   }, []);
 
   useEffect(() => {
     if (data.length > 0) {
-      localStorage.setItem('crm_data', JSON.stringify(data));
-      localStorage.setItem('crm_state', JSON.stringify(crmState));
+      try {
+        localStorage.setItem('crm_data', JSON.stringify(data));
+        localStorage.setItem('crm_state', JSON.stringify(crmState));
+      } catch(e) { console.warn("Falha ao salvar no local storage", e) }
     }
   }, [data, crmState]);
 
@@ -157,6 +167,7 @@ export default function App() {
       localStorage.removeItem('crm_state');
       setData([]);
       setCrmState({});
+      setErrorMsg('');
     }
   };
 
@@ -165,6 +176,7 @@ export default function App() {
     if (!file) return;
 
     setIsLoading(true);
+    setErrorMsg('');
     const reader = new FileReader();
     reader.onload = (event) => {
       try {
@@ -174,7 +186,7 @@ export default function App() {
         processData(parsedData);
       } catch (err) {
         console.error("Erro na leitura do arquivo:", err);
-        alert("Ocorreu um erro ao ler a sua planilha. Verifique se ela é um arquivo CSV válido.");
+        setErrorMsg("Ocorreu um erro ao processar a planilha. Verifique a formatação do arquivo CSV.");
       } finally {
         setIsLoading(false);
         e.target.value = null; 
@@ -184,31 +196,35 @@ export default function App() {
   };
 
   const processData = (rawData) => {
-    if (rawData.length === 0) {
-      alert("A planilha parece estar vazia ou não pôde ser lida.");
+    if (!rawData || rawData.length === 0) {
+      setErrorMsg("A planilha parece estar vazia ou não pôde ser lida.");
       return;
     }
 
     const headers = Object.keys(rawData[0]);
     
-    const numFuncCol = headers.find(h => h.toUpperCase().includes('FUNCIONÁRIO') || h.toUpperCase().includes('FUNCIONARIO') || h.toUpperCase().includes('COLABORADORES'));
-    const cnpjCol = headers.find(h => h.toUpperCase().includes('CNPJ'));
-    const razaoCol = headers.find(h => h.toUpperCase().includes('RAZÃO') || h.toUpperCase().includes('RAZAO'));
-    const cidadeCol = headers.find(h => h.toUpperCase().includes('CIDADE') || h.toUpperCase().includes('MUNICÍPIO'));
-    const setorCol = headers.find(h => h.toUpperCase().includes('SETOR'));
-    const porteCol = headers.find(h => h.toUpperCase().includes('PORTE'));
-    const nomeCol = headers.find(h => h.toUpperCase() === 'NOME' || h.toUpperCase().includes('CONTATO'));
-    const telCol = headers.find(h => h.toUpperCase().includes('TELEFONE') || h.toUpperCase().includes('CELULAR'));
+    // Identificadores de coluna super flexíveis
+    const getCol = (keywords) => headers.find(h => keywords.some(k => h?.toString().toUpperCase().includes(k)));
+    
+    const numFuncCol = getCol(['FUNCIONÁRIO', 'FUNCIONARIO', 'COLABORADORES']);
+    const cnpjCol = getCol(['CNPJ']);
+    const razaoCol = getCol(['RAZÃO', 'RAZAO', 'EMPRESA']);
+    const cidadeCol = getCol(['CIDADE', 'MUNICÍPIO', 'MUNICIPIO']);
+    const setorCol = getCol(['SETOR', 'SEGMENTO']);
+    const porteCol = getCol(['PORTE', 'TAMANHO']);
+    const nomeCol = getCol(['NOME', 'CONTATO', 'RESPONSÁVEL']);
+    const telCol = getCol(['TELEFONE', 'CELULAR', 'WHATSAPP']);
 
     let processed = rawData;
     if (numFuncCol) {
-      processed = processed.filter(d => 
-        d[numFuncCol] && !d[numFuncCol].toUpperCase().includes('ATÉ 04') && !d[numFuncCol].toUpperCase().includes('ATE 04')
-      );
+      processed = processed.filter(d => {
+        const val = d[numFuncCol]?.toString().toUpperCase() || '';
+        return val && !val.includes('ATÉ 04') && !val.includes('ATE 04');
+      });
     }
 
     if (processed.length === 0) {
-      alert("Nenhuma empresa atendeu aos critérios iniciais.");
+      setErrorMsg("Nenhuma empresa atendeu aos critérios iniciais (todas filtradas por porte).");
       return;
     }
 
@@ -216,8 +232,8 @@ export default function App() {
     processed.forEach(empresa => {
       let explicitScore = 0;
       CONSULTORIAS.forEach(cons => { 
-        const col = headers.find(h => h.toUpperCase() === cons.toUpperCase());
-        if (col && empresa[col] && empresa[col].toUpperCase() === 'SIM') explicitScore += 1; 
+        const col = headers.find(h => h?.toString().toUpperCase() === cons.toUpperCase());
+        if (col && empresa[col]?.toString().toUpperCase() === 'SIM') explicitScore += 1; 
       });
       empresa.explicitScore = explicitScore;
 
@@ -230,14 +246,14 @@ export default function App() {
     const initialCrmState = {};
 
     processed = processed.map((empresa, idx) => {
-      let score = empresa.explicitScore;
+      let score = empresa.explicitScore || 0;
       let isLookalike = false;
       let curadoriaReason = '';
       let interesses = [];
       
       CONSULTORIAS.forEach(cons => { 
-        const col = headers.find(h => h.toUpperCase() === cons.toUpperCase());
-        if (col && empresa[col] && empresa[col].toUpperCase() === 'SIM') interesses.push(cons); 
+        const col = headers.find(h => h?.toString().toUpperCase() === cons.toUpperCase());
+        if (col && empresa[col]?.toString().toUpperCase() === 'SIM') interesses.push(cons); 
       });
       
       if (score === 0 && cidadeCol && porteCol && setorCol) {
@@ -250,7 +266,7 @@ export default function App() {
         else if (strength === 1) { score = 0.5; isLookalike = true; curadoriaReason = 'Perfil Semelhante a leads'; }
       }
 
-      const idCnpj = cnpjCol ? empresa[cnpjCol] : '';
+      const idCnpj = (cnpjCol && empresa[cnpjCol]) ? empresa[cnpjCol].toString() : '';
       const cnpj_key = idCnpj ? `${idCnpj}-${idx}` : `fallback-id-${idx}`;
       
       const statusLido = headers.includes('Status da Negociação') ? empresa['Status da Negociação'] : 'Não Contactado';
@@ -264,20 +280,21 @@ export default function App() {
       return { 
         ...empresa, 
         score, interesses, isLookalike, curadoriaReason, cnpj_key,
-        _RAZAO_SOCIAL: razaoCol ? empresa[razaoCol] : 'Nome Não Identificado',
+        _RAZAO_SOCIAL: (razaoCol && empresa[razaoCol]) ? empresa[razaoCol] : 'Empresa Indefinida',
         _CNPJ: idCnpj || 'CNPJ N/D',
-        _CIDADE: cidadeCol ? empresa[cidadeCol] : '-',
-        _SETOR: setorCol ? empresa[setorCol] : '-',
-        _PORTE: porteCol ? empresa[porteCol] : '-',
-        _NOME: nomeCol ? empresa[nomeCol] : '-',
-        _TELEFONE: telCol ? empresa[telCol] : '-',
-        _FUNCIONARIOS: numFuncCol ? empresa[numFuncCol] : 'N/I'
+        _CIDADE: (cidadeCol && empresa[cidadeCol]) ? empresa[cidadeCol] : '-',
+        _SETOR: (setorCol && empresa[setorCol]) ? empresa[setorCol] : '-',
+        _PORTE: (porteCol && empresa[porteCol]) ? empresa[porteCol] : '-',
+        _NOME: (nomeCol && empresa[nomeCol]) ? empresa[nomeCol] : '-',
+        _TELEFONE: (telCol && empresa[telCol]) ? empresa[telCol] : '-',
+        _FUNCIONARIOS: (numFuncCol && empresa[numFuncCol]) ? empresa[numFuncCol] : 'N/I'
       };
     });
 
     processed.sort((a, b) => b.score - a.score);
     setData(processed);
     setCrmState(initialCrmState);
+    setErrorMsg('');
   };
 
   const getCrmData = (cnpj) => crmState[cnpj] || { status: 'Não Contactado', consultoria: '' };
@@ -406,9 +423,17 @@ export default function App() {
             <Zap size={40} />
           </div>
           <h1 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3">CRM Inteligência de Mercado</h1>
-          <p className="text-slate-600 mb-8 text-base md:text-lg">
-            A base de dados não foi encontrada no servidor. Para iniciar, selecione a planilha que deseja vincular.
-          </p>
+          
+          {errorMsg ? (
+            <div className="bg-red-50 text-red-700 p-4 rounded-lg mb-6 text-sm font-medium border border-red-200">
+              {errorMsg}
+            </div>
+          ) : (
+            <p className="text-slate-600 mb-8 text-base md:text-lg">
+              A base de dados não foi encontrada no servidor. Para iniciar, selecione a planilha que deseja vincular.
+            </p>
+          )}
+
           <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 md:py-4 px-6 md:px-8 rounded-xl inline-flex items-center transition-all shadow-md hover:shadow-lg">
             <Upload className="mr-3" size={24} />
             Vincular Planilha (CSV)
@@ -420,7 +445,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32 w-full relative">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-32 w-full relative overflow-x-hidden">
       
       {/* HEADER PRINCIPAL */}
       <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 w-full">
@@ -481,7 +506,7 @@ export default function App() {
         </div>
 
         {/* FUNIL DINÂMICO */}
-        <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 relative">
+        <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200 relative overflow-hidden">
           <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4">
             <h2 className="text-lg font-bold flex items-center text-slate-700">
               <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline Geral de Vendas
@@ -743,7 +768,7 @@ export default function App() {
 
       {/* BARRA FIXA DE AÇÃO EM MASSA */}
       {selectedLeads.length > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] md:w-auto bg-indigo-600 text-white p-4 rounded-xl shadow-2xl flex flex-col md:flex-row items-center justify-between z-50 border border-indigo-400/50">
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 w-[95%] md:w-auto bg-indigo-600 text-white p-4 rounded-xl shadow-2xl flex flex-col md:flex-row items-center justify-between z-[100] border border-indigo-400/50">
           <div className="flex flex-col sm:flex-row items-center mb-3 md:mb-0 w-full md:w-auto text-center md:text-left md:mr-6">
             <div className="flex items-center justify-center md:justify-start">
               <CheckSquare size={20} className="mr-2 text-indigo-200 shrink-0" />
