@@ -4,7 +4,7 @@ import {
   Download, BarChart2, Briefcase, Filter,
   LayoutGrid, List, Info, CheckSquare, Square, 
   ArrowRightCircle, CheckCircle2, Zap,
-  Building, Target, ThermometerSun, XCircle, Save, Lightbulb
+  Building, Target, ThermometerSun, XCircle, Save, Lightbulb, Trash2, RefreshCw
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell
@@ -64,11 +64,28 @@ export default function App() {
   const [selectedLeads, setSelectedLeads] = useState([]);
   const [bulkStatus, setBulkStatus] = useState('');
 
-  // --- Tentativa de Auto-Load para GitHub Pages ---
+  // --- Auto-Load Seguro para GitHub Pages com LocalStorage ---
   useEffect(() => {
-    fetch('./data.csv')
+    // 1. Tenta carregar os dados salvos localmente no navegador primeiro (Evita perda de dados ao dar F5)
+    const localData = localStorage.getItem('crm_data');
+    const localCrmState = localStorage.getItem('crm_state');
+
+    if (localData && localCrmState) {
+      try {
+        setData(JSON.parse(localData));
+        setCrmState(JSON.parse(localCrmState));
+        setIsLoading(false);
+        return; // Sai do useEffect se carregou com sucesso
+      } catch (e) {
+        console.error("Erro ao ler LocalStorage", e);
+      }
+    }
+
+    // 2. Se não tem dados locais, tenta puxar do servidor (GitHub Pages)
+    // Usando caminho relativo simples que funciona melhor em repositórios do GitHub Pages
+    fetch('data.csv')
       .then(response => {
-        if (!response.ok) throw new Error('Arquivo local não encontrado');
+        if (!response.ok) throw new Error('Arquivo data.csv não encontrado no servidor');
         return response.text();
       })
       .then(text => {
@@ -77,10 +94,28 @@ export default function App() {
         setIsLoading(false);
       })
       .catch(err => {
-        console.log('Nenhum dado pré-carregado encontrado. Aguardando upload manual.');
+        console.log('Sem base online. Aguardando upload manual.', err);
         setIsLoading(false);
       });
   }, []);
+
+  // --- Sincronizar alterações com LocalStorage automaticamente ---
+  useEffect(() => {
+    if (data.length > 0) {
+      localStorage.setItem('crm_data', JSON.stringify(data));
+      localStorage.setItem('crm_state', JSON.stringify(crmState));
+    }
+  }, [data, crmState]);
+
+  // Função para resetar e carregar nova base
+  const clearLocalData = () => {
+    if(window.confirm("Isso apagará o seu progresso local atual e solicitará uma nova planilha. Tem certeza?")) {
+      localStorage.removeItem('crm_data');
+      localStorage.removeItem('crm_state');
+      setData([]);
+      setCrmState({});
+    }
+  };
 
   // --- Processamento de CSV ---
   const parseCSV = (text) => {
@@ -105,11 +140,13 @@ export default function App() {
     const file = e.target.files[0];
     if (!file) return;
 
+    setIsLoading(true);
     const reader = new FileReader();
     reader.onload = (event) => {
       const text = event.target.result;
       const parsedData = parseCSV(text);
       processData(parsedData);
+      setIsLoading(false);
     };
     reader.readAsText(file, 'UTF-8');
   };
@@ -119,7 +156,7 @@ export default function App() {
       d['NÚMERO DE FUNCIONÁRIOS'] && d['NÚMERO DE FUNCIONÁRIOS'] !== 'Até 04 colaboradores'
     );
 
-    // Mapeamento de Força do Perfil (Sósias / Lookalike Avançado)
+    // Mapeamento de Força do Perfil (Curadoria Inteligente)
     const profileStrength = {};
     
     processed.forEach(empresa => {
@@ -131,7 +168,6 @@ export default function App() {
 
       if (explicitScore > 0) {
         const key = `${empresa['CIDADE']}|${empresa['PORTE']}|${empresa['SETOR']}`;
-        // Soma a força total de interesses daquele perfil exato
         profileStrength[key] = (profileStrength[key] || 0) + explicitScore;
       }
     });
@@ -148,27 +184,19 @@ export default function App() {
         if (empresa[cons] === 'Sim') interesses.push(cons);
       });
       
-      // Se não demonstrou interesse, classificamos baseado na força do mercado local/setor
+      // Avaliação de sósias
       if (score === 0) {
         const key = `${empresa['CIDADE']}|${empresa['PORTE']}|${empresa['SETOR']}`;
         const strength = profileStrength[key] || 0;
         
         if (strength >= 10) {
-          score = 3; // Muito Quente
-          isLookalike = true;
-          curadoriaReason = 'Alta conversão neste Perfil na sua base';
+          score = 3; isLookalike = true; curadoriaReason = 'Alta conversão neste Perfil na sua base';
         } else if (strength >= 5) {
-          score = 2; // Quente
-          isLookalike = true;
-          curadoriaReason = 'Boa conversão neste Perfil na sua base';
+          score = 2; isLookalike = true; curadoriaReason = 'Boa conversão neste Perfil na sua base';
         } else if (strength >= 2) {
-          score = 1; // Morno
-          isLookalike = true;
-          curadoriaReason = 'Alguma conversão neste Perfil na sua base';
+          score = 1; isLookalike = true; curadoriaReason = 'Alguma conversão neste Perfil na sua base';
         } else if (strength === 1) {
-          score = 0.5; // Potencial
-          isLookalike = true;
-          curadoriaReason = 'Perfil Semelhante a pelo menos 1 lead';
+          score = 0.5; isLookalike = true; curadoriaReason = 'Perfil Semelhante a pelo menos 1 lead';
         }
       }
 
@@ -282,7 +310,7 @@ export default function App() {
     const baseHeaders = Object.keys(dataToExport[0]).filter(k => 
       !['score', 'explicitScore', 'isLookalike', 'curadoriaReason', 'interesses', 'cnpj_key', 'Status da Negociação', 'Consultoria Foco'].includes(k)
     );
-    // Adiciona uma coluna para você saber se foi interesse direto ou puxado pelo algoritmo
+    
     const headers = [...baseHeaders, 'Status da Negociação', 'Consultoria Foco', 'Origem da Qualificacao'];
 
     const rows = dataToExport.map(emp => {
@@ -296,6 +324,7 @@ export default function App() {
     });
 
     const csvContent = [headers.join(';'), ...rows].join('\n');
+    // Força o encoding UTF-8 com BOM para abrir certinho no Excel
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -321,7 +350,7 @@ export default function App() {
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
         <div className="flex flex-col items-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mb-4"></div>
-          <p className="text-slate-600 font-medium">Sincronizando banco de dados...</p>
+          <p className="text-slate-600 font-medium">Sincronizando banco de dados no GitHub Pages...</p>
         </div>
       </div>
     );
@@ -334,9 +363,9 @@ export default function App() {
           <div className="w-20 h-20 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6">
             <Zap size={40} />
           </div>
-          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3">CRM de Inteligência Artificial</h1>
+          <h1 className="text-2xl md:text-3xl font-extrabold text-slate-800 mb-3">CRM de Inteligência de Mercado</h1>
           <p className="text-slate-600 mb-8 text-base md:text-lg">
-            Nenhuma base de dados nativa encontrada. Faça o upload manual da sua planilha.
+            Nenhuma base de dados encontrada no servidor ou cache local. Faça o upload manual da sua planilha.
           </p>
           <label className="cursor-pointer bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 md:py-4 px-6 md:px-8 rounded-xl inline-flex items-center transition-all shadow-md hover:shadow-lg hover:-translate-y-1">
             <Upload className="mr-3" size={24} />
@@ -349,43 +378,51 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 overflow-x-hidden">
-      {/* HEADER PRINCIPAL */}
-      <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans pb-20 overflow-x-hidden w-full">
+      {/* HEADER PRINCIPAL RESPONSIVO */}
+      <header className="bg-slate-900 text-white px-4 md:px-6 py-4 shadow-lg flex flex-col md:flex-row justify-between items-center sticky top-0 z-50 gap-4 w-full">
         <div className="flex items-center space-x-3 w-full md:w-auto justify-center md:justify-start">
           <Briefcase className="text-blue-400 shrink-0" size={28} />
-          <div>
-            <h1 className="text-lg md:text-xl font-bold leading-tight truncate max-w-[250px] md:max-w-md">CRM Inteligência de Mercado</h1>
-            <p className="text-xs text-slate-400">Prospecção guiada por dados</p>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-lg md:text-xl font-bold leading-tight truncate">CRM Inteligência de Mercado</h1>
+            <p className="text-xs text-slate-400 truncate">Prospecção guiada por dados</p>
           </div>
         </div>
-        <div className="flex space-x-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
+        <div className="flex flex-wrap justify-center gap-2 w-full md:w-auto">
           <button 
             onClick={exportFiltered}
-            className="bg-slate-700 hover:bg-slate-600 text-white px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all whitespace-nowrap shrink-0"
-            title="Exporta a seleção atual de empresas (ou todos os filtrados se nenhum estiver selecionado)."
+            className="bg-slate-700 hover:bg-slate-600 text-white px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shrink-0"
+            title="Exportar seleção atual de empresas"
           >
-            <Download size={16} className="mr-2" />
-            Exportar Visão
+            <Download size={16} className="mr-1.5 md:mr-2" />
+            <span className="hidden sm:inline">Exportar</span> Visão
           </button>
           <button 
             onClick={exportFullDatabase}
-            className="bg-green-500 hover:bg-green-400 text-slate-900 px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md hover:shadow-lg whitespace-nowrap shrink-0"
-            title="Baixe toda a base atualizada para subir no repositório (data.csv)"
+            className="bg-green-500 hover:bg-green-400 text-slate-900 px-3 md:px-4 py-2 rounded-lg flex items-center text-xs md:text-sm font-bold transition-all shadow-md shrink-0"
+            title="Baixe toda a base para subir no GitHub e atualizar o repositório"
           >
-            <Save size={16} className="mr-2" />
-            Salvar Banco de Dados
+            <Save size={16} className="mr-1.5 md:mr-2" />
+            <span className="hidden sm:inline">Salvar</span> Base Completa
+          </button>
+          <button 
+            onClick={clearLocalData}
+            className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg flex items-center text-xs font-bold transition-all shadow-md shrink-0"
+            title="Apaga os dados salvos no seu navegador para carregar uma nova base"
+          >
+            <Trash2 size={16} className="sm:mr-1.5" />
+            <span className="hidden sm:inline">Limpar Cache</span>
           </button>
         </div>
       </header>
 
-      <main className="p-4 md:p-6 max-w-7xl mx-auto space-y-6">
+      <main className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 w-full">
         
-        {/* BOAS-VINDAS E PARÁGRAFO INTRODUTÓRIO */}
+        {/* PARÁGRAFO INTRODUTÓRIO */}
         <div className="bg-white rounded-xl p-5 md:p-6 shadow-sm border border-slate-200">
-          <h2 className="text-xl font-extrabold text-slate-800 mb-2">Bem-vindo ao seu Mapa de Oportunidades 🚀</h2>
+          <h2 className="text-lg md:text-xl font-extrabold text-slate-800 mb-2">Bem-vindo ao seu Mapa de Oportunidades 🚀</h2>
           <p className="text-slate-600 text-sm md:text-base leading-relaxed">
-            Esta ferramenta cruza os dados do seu mercado com o nível de interesse demonstrado nas consultorias. O objetivo é ajudar a sua equipe a priorizar contatos, atacando primeiro os "Leads Quentes" e as empresas "Sósias" (que compartilham características de sucesso). Use os painéis abaixo para <b>filtrar, agir e avançar as negociações.</b>
+            Esta ferramenta cruza os dados do seu mercado com o nível de interesse demonstrado nas consultorias. Seus dados estão sendo salvos localmente neste navegador, mas lembre-se de <b>"Salvar a Base Completa"</b> e atualizar o <code>data.csv</code> no GitHub para compartilhar o progresso com o time.
           </p>
         </div>
 
@@ -393,37 +430,24 @@ export default function App() {
         <div className="bg-blue-50 border border-blue-100 rounded-xl p-4 flex flex-col lg:flex-row gap-4 items-start lg:items-center justify-between shadow-sm">
           <div className="flex-1 w-full">
             <h2 className="text-blue-800 font-bold flex items-center text-sm mb-1">
-              <Lightbulb size={18} className="mr-1.5 text-yellow-500"/> Entendendo a Inteligência (Sósias)
+              <Lightbulb size={18} className="mr-1.5 text-yellow-500"/> Sósias Inteligentes (Lookalike)
             </h2>
             <p className="text-xs text-slate-600 leading-relaxed">
-              O sistema utiliza um algoritmo de <b>Lookalike</b>: empresas que nunca demonstraram interesse explícito (Frias), mas que possuem a <b>mesma Localidade, Porte e Setor</b> de empresas que já demonstraram interesse, são promovidas automaticamente para o status de <span className="font-bold text-emerald-600">🎯 Potencial</span>.
+              Empresas "Frias" que possuem a <b>mesma Localidade, Porte e Setor</b> de empresas que já demonstraram interesse são promovidas para <span className="font-bold text-emerald-600">🎯 Potencial</span>.
             </p>
           </div>
           
           <div className="hidden lg:block w-px h-12 bg-blue-200 mx-4"></div>
           
           <div className="flex-1 flex flex-col w-full">
-            <span className="text-xs font-semibold text-slate-500 mb-2">Legenda do Termômetro de Interesse:</span>
-            <div className="flex flex-wrap gap-2">
+            <span className="text-xs font-semibold text-slate-500 mb-2">Termômetro de Interesse:</span>
+            <div className="flex flex-wrap gap-1.5 md:gap-2">
               {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => (
                 <div key={score} className={`px-2 py-1 rounded text-[10px] font-bold ${config.bg} ${config.color} border border-white flex items-center shadow-sm`} title={config.desc}>
                   <span className="mr-1">{config.icon}</span> {config.label}
                 </div>
               ))}
             </div>
-          </div>
-        </div>
-
-        {/* DICA DE OURO - COMO BUSCAR A CURADORIA AVANÇADA */}
-        <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 shadow-sm flex items-start mt-4">
-          <Target size={24} className="text-emerald-600 mr-3 shrink-0 mt-0.5" />
-          <div>
-            <h3 className="font-bold text-emerald-800 text-sm mb-1">Encontrando "Diamantes Escondidos" 💎</h3>
-            <p className="text-xs text-emerald-700 leading-relaxed">
-              Para encontrar as empresas que <b>não se inscreveram</b> em nenhuma consultoria, mas que o sistema recomenda como <b>Quentes ou Muito Quentes</b> baseado no segmento, vá nos filtros abaixo e marque: <br/> 
-              1️⃣ Consultoria: <b>"Nenhum Registro Explícito"</b> <br/>
-              2️⃣ Termômetro: <b>"Morno", "Quente" ou "Muito Quente"</b>.
-            </p>
           </div>
         </div>
 
@@ -434,16 +458,14 @@ export default function App() {
               <h2 className="text-lg font-bold flex items-center text-slate-700">
                 <BarChart2 size={20} className="mr-2 text-blue-500" /> Pipeline Geral de Vendas
               </h2>
-              <p className="text-xs text-slate-500 mt-1">Este gráfico representa o volume atual de leads em cada estágio de contato.</p>
             </div>
-            
-            <span className="mt-3 sm:mt-0 text-[11px] font-semibold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
-              <Info size={14} className="mr-1" />
-              Clique em uma barra para filtrar a tabela por essa etapa
+            <span className="mt-2 sm:mt-0 text-[11px] font-semibold text-blue-700 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 flex items-center">
+              <Info size={14} className="mr-1 shrink-0" />
+              Clique em uma barra para filtrar
             </span>
           </div>
           
-          <div className="flex flex-col space-y-3 mt-4">
+          <div className="flex flex-col space-y-3 mt-4 w-full overflow-x-hidden">
             {funnelData.map((stage) => {
               const config = FUNNEL_COLORS[stage.name];
               const widthPercent = Math.max(15, (stage.Quantidade / maxFunnelValue) * 100);
@@ -453,7 +475,7 @@ export default function App() {
                 <div 
                   key={stage.name} 
                   onClick={() => setFilterStatus(isActiveFilter ? 'Todos' : stage.name)}
-                  className="flex flex-col group cursor-pointer"
+                  className="flex flex-col group cursor-pointer w-full"
                 >
                   <div className="flex items-center text-xs font-medium text-slate-500 mb-1 ml-1 sm:hidden">
                     {stage.name}
@@ -461,14 +483,13 @@ export default function App() {
                   <div 
                     style={{ width: `${widthPercent}%` }}
                     className={`
-                      relative h-12 sm:h-10 rounded-r-xl rounded-l-md flex items-center justify-between px-3 sm:px-4 transition-all duration-300 ease-out border border-white/50
+                      relative h-12 sm:h-10 rounded-r-xl rounded-l-md flex items-center justify-between px-3 transition-all duration-300 ease-out border border-white/50
                       ${config.bg} ${config.text} ${config.hover}
-                      ${isActiveFilter ? 'ring-2 ring-offset-2 ring-blue-400 scale-[1.01] shadow-md z-10' : 'hover:scale-[1.01] shadow-sm'}
+                      ${isActiveFilter ? 'ring-2 ring-offset-1 ring-blue-400 shadow-md z-10' : 'shadow-sm'}
                     `}
-                    title={`Exibir apenas leads na etapa: ${stage.name}`}
                   >
                     <span className="font-semibold text-xs sm:text-sm truncate pr-2 hidden sm:block">{stage.name}</span>
-                    <span className="font-black text-base sm:text-lg">{stage.Quantidade}</span>
+                    <span className="font-black text-sm sm:text-lg">{stage.Quantidade}</span>
                   </div>
                 </div>
               );
@@ -479,12 +500,11 @@ export default function App() {
         {/* CONTROLES E FILTROS */}
         <div className="bg-white p-4 md:p-6 rounded-2xl shadow-sm border border-slate-200">
           
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 border-b border-slate-100 pb-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-5 border-b border-slate-100 pb-4">
             <div>
               <h3 className="font-bold text-slate-800 text-lg flex items-center">
-                <Filter size={20} className="text-blue-500 mr-2" /> Refine sua Busca e Atuação
+                <Filter size={20} className="text-blue-500 mr-2" /> Refine sua Busca
               </h3>
-              <p className="text-xs text-slate-500 mt-1">Misture localidade, porte e interesses para gerar listas altamente focadas para a equipe comercial.</p>
             </div>
             {isFilterActive && (
               <button onClick={resetFilters} className="mt-3 sm:mt-0 text-sm flex items-center text-red-500 hover:text-red-700 hover:bg-red-50 px-3 py-1.5 rounded-lg font-semibold transition-colors border border-red-100">
@@ -493,57 +513,54 @@ export default function App() {
             )}
           </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 mb-6">
-            <div className="flex flex-col">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1">
-                <MapPin size={16} className="mr-1.5 text-slate-400"/> Localidade
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 w-full">
+            <div className="flex flex-col min-w-0">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
+                <MapPin size={16} className="mr-1.5 text-slate-400 shrink-0"/> Localidade
               </label>
-              <select className="w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50" value={filterCidade} onChange={(e) => setFilterCidade(e.target.value)}>
+              <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterCidade} onChange={(e) => setFilterCidade(e.target.value)}>
                 <option value="">Todas as Cidades</option>
                 {cidadesUnicas.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
 
-            <div className="flex flex-col">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1">
-                <Building size={16} className="mr-1.5 text-slate-400"/> Porte
+            <div className="flex flex-col min-w-0">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
+                <Building size={16} className="mr-1.5 text-slate-400 shrink-0"/> Porte
               </label>
-              <select className="w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50" value={filterPorte} onChange={(e) => setFilterPorte(e.target.value)}>
+              <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterPorte} onChange={(e) => setFilterPorte(e.target.value)}>
                 <option value="">Todos os Portes</option>
                 {portesUnicos.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
 
-            <div className="flex flex-col">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1">
-                <Target size={16} className="mr-1.5 text-slate-400"/> Status da Negociação
+            <div className="flex flex-col min-w-0">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
+                <Target size={16} className="mr-1.5 text-slate-400 shrink-0"/> Status
               </label>
-              <select className="w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+              <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
                 <option value="Todos">Visualizando Todos</option>
                 {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
 
-            <div className="flex flex-col">
-              <label className="text-sm font-bold text-slate-700 flex items-center mb-1">
-                <Zap size={16} className="mr-1.5 text-slate-400"/> Consultoria de Interesse
+            <div className="flex flex-col min-w-0">
+              <label className="text-sm font-bold text-slate-700 flex items-center mb-1 truncate">
+                <Zap size={16} className="mr-1.5 text-slate-400 shrink-0"/> Interesse Específico
               </label>
-              <select className="w-full border rounded-lg p-2.5 text-sm transition-colors focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50" value={filterInteresseEspecifico} onChange={(e) => setFilterInteresseEspecifico(e.target.value)}>
-                <option value="Todos">Qualquer Interesse</option>
+              <select className="w-full border rounded-lg p-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none border-slate-200 bg-slate-50 truncate" value={filterInteresseEspecifico} onChange={(e) => setFilterInteresseEspecifico(e.target.value)}>
+                <option value="Todos">Qualquer</option>
                 {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
-                <option value="Nenhum">Nenhum Registro Explícito</option>
+                <option value="Nenhum">Nenhum Explícito</option>
               </select>
             </div>
           </div>
 
-          <div className="flex flex-col border-t border-slate-100 pt-5">
-            <label className="text-sm font-bold text-slate-700 flex items-center mb-1">
-              <ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Interesse Mínimo (Selecione a temperatura de corte)
+          <div className="flex flex-col border-t border-slate-100 pt-4">
+            <label className="text-sm font-bold text-slate-700 flex items-center mb-2">
+              <ThermometerSun size={18} className="mr-1.5 text-orange-500"/> Interesse Mínimo (Temperatura de corte)
             </label>
-            <p className="text-xs text-slate-500 mb-3">
-              Mostraremos a temperatura selecionada e todas as que forem mais quentes do que ela.
-            </p>
-            <div className="flex flex-wrap sm:flex-nowrap gap-2">
+            <div className="grid grid-cols-3 sm:flex sm:flex-nowrap gap-2 w-full">
               {Object.entries(TERMOMETRO_CORES).sort((a, b) => Number(a[0]) - Number(b[0])).map(([score, config]) => {
                 const numericScore = Number(score);
                 const isActive = filterInteresseMinimo === numericScore; 
@@ -553,14 +570,14 @@ export default function App() {
                   <button 
                     key={score}
                     onClick={() => setFilterInteresseMinimo(numericScore)}
-                    className={`flex-1 py-2 sm:py-3 px-2 rounded-xl border text-xs sm:text-sm transition-all flex flex-col items-center justify-center gap-1
-                      ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 scale-105 z-10' : 
-                        isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50 hover:border-blue-200' : 'border-slate-100 bg-slate-50/50 opacity-50 grayscale'
+                    className={`flex-1 py-2 px-1 rounded-xl border text-[10px] sm:text-xs md:text-sm transition-all flex flex-col items-center justify-center gap-1 min-w-[50px]
+                      ${isActive ? 'ring-2 ring-blue-500 shadow-md bg-blue-50 border-blue-200 z-10' : 
+                        isIncluded ? 'border-slate-200 bg-white hover:bg-slate-50' : 'border-slate-100 bg-slate-50/50 opacity-60 grayscale'
                       }
                     `}
                   >
-                    <span className="text-xl sm:text-2xl mb-1">{config.icon}</span>
-                    <span className={`font-bold text-center leading-none ${isIncluded ? config.color : 'text-slate-400'}`}>
+                    <span className="text-lg sm:text-xl mb-0.5">{config.icon}</span>
+                    <span className={`font-bold text-center leading-tight truncate w-full px-1 ${isIncluded ? config.color : 'text-slate-400'}`}>
                       {config.label}
                     </span>
                   </button>
@@ -572,23 +589,20 @@ export default function App() {
 
         {/* BULK ACTION BAR (MÚLTIPLAS SELEÇÕES) */}
         {selectedLeads.length > 0 && (
-          <div className="bg-indigo-600 text-white p-4 rounded-xl shadow-2xl flex flex-col sm:flex-row items-center justify-between animate-in slide-in-from-bottom-4 sticky top-24 z-40 border-2 border-indigo-400/50 mx-2 md:mx-0">
-            <div className="flex flex-col sm:flex-row items-start sm:items-center mb-3 sm:mb-0 w-full sm:w-auto">
-              <div className="flex items-center">
-                <CheckSquare size={20} className="mr-2 text-indigo-200 shrink-0" />
+          <div className="bg-indigo-600 text-white p-3 md:p-4 rounded-xl shadow-xl flex flex-col md:flex-row items-center justify-between animate-in slide-in-from-bottom-4 sticky top-20 z-40 border border-indigo-400/50 mx-auto w-full max-w-[calc(100vw-32px)] md:max-w-full">
+            <div className="flex flex-col sm:flex-row items-center mb-3 md:mb-0 w-full md:w-auto text-center md:text-left">
+              <div className="flex items-center justify-center md:justify-start">
+                <CheckSquare size={18} className="mr-2 text-indigo-200 shrink-0" />
                 <span className="font-bold text-sm md:text-base">{selectedLeads.length} empresas selecionadas</span>
               </div>
-              <span className="text-indigo-200 text-xs sm:ml-4 mt-1 sm:mt-0 hidden md:block">
-                Dica: Selecione o novo status abaixo e clique em "Aplicar" para mover todas de uma vez no funil.
-              </span>
             </div>
-            <div className="flex items-center w-full sm:w-auto space-x-2 md:space-x-3">
+            <div className="flex items-center w-full md:w-auto space-x-2">
               <select 
-                className="flex-1 sm:w-48 border-none rounded-lg p-2 text-xs md:text-sm text-slate-800 font-medium shadow-inner outline-none h-10"
+                className="flex-1 md:w-48 border-none rounded-lg p-2 text-xs md:text-sm text-slate-800 font-medium shadow-inner outline-none h-10 min-w-0"
                 value={bulkStatus}
                 onChange={(e) => setBulkStatus(e.target.value)}
               >
-                <option value="">Status para mover...</option>
+                <option value="">Novo status...</option>
                 {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
               <button 
@@ -596,50 +610,49 @@ export default function App() {
                 disabled={!bulkStatus}
                 className="bg-white text-indigo-600 px-3 md:px-4 py-2 rounded-lg font-bold text-xs md:text-sm hover:bg-indigo-50 disabled:opacity-50 transition-colors shadow-sm flex items-center h-10 shrink-0"
               >
-                Aplicar <ArrowRightCircle size={16} className="ml-1 hidden md:block"/>
+                Aplicar <ArrowRightCircle size={16} className="ml-1 hidden sm:block"/>
               </button>
             </div>
           </div>
         )}
 
         {/* LISTAGEM DE DADOS */}
-        <div>
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-4 gap-4">
-            <div>
-              <h2 className="text-lg md:text-xl font-bold text-slate-800 flex items-center">
+        <div className="w-full">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-4 gap-3">
+            <div className="flex items-center w-full md:w-auto">
+              <h2 className="text-lg font-bold text-slate-800 flex items-center">
                 Mesa de Atuação 
                 <span className="ml-2 bg-slate-200 text-slate-700 text-xs px-2.5 py-1 rounded-full">{filteredData.length} leads</span>
               </h2>
-              <p className="text-xs text-slate-500 mt-1">Trave o "Foco" para garantir a regra de apenas uma consultoria ofertada por empresa.</p>
             </div>
             
-            <div className="flex bg-slate-200 rounded-lg p-1 w-full sm:w-auto">
-              <button onClick={() => setViewMode('table')} className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}>
-                <List size={16} className="mr-2" /> Tabela
+            <div className="flex bg-slate-200 rounded-lg p-1 w-full md:w-auto">
+              <button onClick={() => setViewMode('table')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors ${viewMode === 'table' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}>
+                <List size={16} className="mr-1.5" /> Tabela
               </button>
-              <button onClick={() => setViewMode('cards')} className={`flex-1 sm:flex-none flex justify-center items-center px-4 py-2 text-sm font-medium rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}>
-                <LayoutGrid size={16} className="mr-2" /> Cards
+              <button onClick={() => setViewMode('cards')} className={`flex-1 md:flex-none flex justify-center items-center px-4 py-2 text-xs md:text-sm font-medium rounded-md transition-colors ${viewMode === 'cards' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-600'}`}>
+                <LayoutGrid size={16} className="mr-1.5" /> Cards
               </button>
             </div>
           </div>
           
-          {/* TABELA */}
+          {/* TABELA RESPONSIVA */}
           {viewMode === 'table' && (
-            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto">
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-x-auto w-full block">
               <table className="w-full text-sm text-left text-slate-600 whitespace-nowrap">
                 <thead className="text-xs text-slate-700 uppercase bg-slate-100 border-b border-slate-200">
                   <tr>
-                    <th className="px-4 py-4 w-12 text-center" title="Selecionar todos visíveis">
+                    <th className="px-3 md:px-4 py-3 md:py-4 w-10 md:w-12 text-center sticky left-0 bg-slate-100 z-10" title="Selecionar todos">
                       <button onClick={toggleAll} className="text-slate-500 hover:text-blue-600 transition-colors">
-                        {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={18}/> : <Square size={18}/>}
+                        {selectedLeads.length === filteredData.length && filteredData.length > 0 ? <CheckSquare size={16}/> : <Square size={16}/>}
                       </button>
                     </th>
-                    <th className="px-4 py-3">Termômetro</th>
-                    <th className="px-4 py-3">Empresa</th>
-                    <th className="px-4 py-3">Colaboradores</th>
-                    <th className="px-4 py-3">Contato</th>
-                    <th className="px-4 py-3" title="Mude o status para atualizar o funil de vendas">Status CRM</th>
-                    <th className="px-4 py-3" title="Garante a regra de 1 consultoria por lead">Consultoria Foco</th>
+                    <th className="px-3 md:px-4 py-3">Termômetro</th>
+                    <th className="px-3 md:px-4 py-3">Empresa</th>
+                    <th className="px-3 md:px-4 py-3">Colaboradores</th>
+                    <th className="px-3 md:px-4 py-3">Contato</th>
+                    <th className="px-3 md:px-4 py-3">Status CRM</th>
+                    <th className="px-3 md:px-4 py-3">Consultoria Foco</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -651,49 +664,48 @@ export default function App() {
 
                     return (
                       <tr key={emp.cnpj_key} className={`border-b transition-colors ${rowClass}`}>
-                        <td className="px-4 py-3 text-center">
+                        <td className="px-3 md:px-4 py-3 text-center sticky left-0 z-10 bg-inherit">
                           <button onClick={() => toggleSelection(emp.cnpj_key)} className={isSelected ? 'text-indigo-600' : 'text-slate-300 hover:text-slate-400'}>
-                            {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
+                            {isSelected ? <CheckSquare size={16}/> : <Square size={16}/>}
                           </button>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 md:px-4 py-3">
                           <span className={`inline-flex items-center px-2 py-1 rounded text-xs font-bold ${scoreData.bg} ${scoreData.color}`} title={scoreData.desc}>
                             {scoreData.icon} <span className="ml-1">{emp.score}</span>
                           </span>
-                          {/* Selo de curadoria para a tabela */}
                           {emp.isLookalike && emp.score > 0 && (
-                            <div className="mt-1.5 flex items-center text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-1.5 py-0.5 rounded w-fit" title={emp.curadoriaReason}>
-                              <Target size={11} className="mr-1"/> Curadoria
+                            <div className="mt-1 flex items-center text-[9px] md:text-[10px] font-semibold text-emerald-700 bg-emerald-100/80 border border-emerald-200 px-1.5 py-0.5 rounded w-fit" title={emp.curadoriaReason}>
+                              <Target size={10} className="mr-1"/> Curadoria
                             </div>
                           )}
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="font-bold text-slate-800 max-w-[200px] truncate" title={emp['RAZÃO SOCIAL']}>
+                        <td className="px-3 md:px-4 py-3 max-w-[150px] md:max-w-[200px]">
+                          <div className="font-bold text-slate-800 truncate" title={emp['RAZÃO SOCIAL']}>
                             {emp['RAZÃO SOCIAL']}
                           </div>
-                          <div className="text-xs text-slate-400 mt-0.5" title="Cidade e Setor de atuação">{emp['CIDADE']} • {emp['SETOR']?.substring(0, 15)}</div>
+                          <div className="text-xs text-slate-400 mt-0.5 truncate" title={`${emp['CIDADE']} • ${emp['SETOR']}`}>{emp['CIDADE']} • {emp['SETOR']?.substring(0, 15)}</div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="inline-flex items-center text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded" title="Número de funcionários informados">
+                        <td className="px-3 md:px-4 py-3">
+                          <div className="inline-flex items-center text-[10px] md:text-xs font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded">
                             {emp['NÚMERO DE FUNCIONÁRIOS'] || 'N/I'}
                           </div>
                         </td>
-                        <td className="px-4 py-3">
-                          <div className="font-medium text-slate-700">{emp['NOME'] || '-'}</div>
-                          <div className="text-xs text-slate-500">{emp['TELEFONE'] || '-'}</div>
+                        <td className="px-3 md:px-4 py-3 max-w-[120px] md:max-w-[150px]">
+                          <div className="font-medium text-slate-700 truncate" title={emp['NOME']}>{emp['NOME'] || '-'}</div>
+                          <div className="text-[10px] md:text-xs text-slate-500 truncate">{emp['TELEFONE'] || '-'}</div>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 md:px-4 py-3">
                           <select 
-                            className="border border-slate-200 rounded p-1.5 text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[140px]"
+                            className="border border-slate-200 rounded p-1.5 text-xs font-semibold bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[110px] md:w-[140px]"
                             value={crm.status}
                             onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}
                           >
                             {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
                           </select>
                         </td>
-                        <td className="px-4 py-3">
+                        <td className="px-3 md:px-4 py-3">
                           <select 
-                            className="border border-slate-200 rounded p-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[140px]"
+                            className="border border-slate-200 rounded p-1.5 text-xs bg-white focus:ring-2 focus:ring-blue-500 outline-none w-[110px] md:w-[140px]"
                             value={crm.consultoria}
                             onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)}
                             disabled={crm.status === 'Não Contactado'}
@@ -706,16 +718,16 @@ export default function App() {
                     );
                   })}
                   {filteredData.length === 0 && (
-                    <tr><td colSpan="6" className="px-4 py-12 text-center text-slate-500">Nenhum resultado encontrado.</td></tr>
+                    <tr><td colSpan="7" className="px-4 py-12 text-center text-slate-500">Nenhum resultado encontrado.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
           )}
 
-          {/* CARDS */}
+          {/* CARDS RESPONSIVOS */}
           {viewMode === 'cards' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 w-full">
               {filteredData.map((emp) => {
                 const crm = getCrmData(emp.cnpj_key);
                 const scoreData = TERMOMETRO_CORES[emp.score] || TERMOMETRO_CORES[0];
@@ -725,44 +737,43 @@ export default function App() {
                   <div key={emp.cnpj_key} className={`bg-white rounded-xl shadow-sm border overflow-hidden flex flex-col relative transition-all ${isSelected ? 'border-indigo-400 ring-2 ring-indigo-400 ring-offset-1' : 'border-slate-200 hover:shadow-md'}`}>
                     
                     <button onClick={() => toggleSelection(emp.cnpj_key)} className={`absolute top-3 left-3 z-10 p-0.5 bg-white rounded shadow-sm ${isSelected ? 'text-indigo-600' : 'text-slate-300'}`}>
-                      {isSelected ? <CheckSquare size={20}/> : <Square size={20}/>}
+                      {isSelected ? <CheckSquare size={18}/> : <Square size={18}/>}
                     </button>
 
-                    <div className={`p-4 pl-12 border-b border-white/50 flex justify-between items-start ${scoreData.bg}`}>
+                    <div className={`p-3 md:p-4 pl-10 md:pl-12 border-b border-white/50 flex justify-between items-start ${scoreData.bg}`}>
                       <div className="flex-1 pr-2 min-w-0">
-                        <h3 className="font-bold text-slate-800 text-sm leading-tight truncate mb-1" title={emp['RAZÃO SOCIAL']}>{emp['RAZÃO SOCIAL']}</h3>
-                        <p className="text-[11px] text-slate-600 font-mono truncate">{emp['CNPJ']}</p>
+                        <h3 className="font-bold text-slate-800 text-xs md:text-sm leading-tight truncate mb-1" title={emp['RAZÃO SOCIAL']}>{emp['RAZÃO SOCIAL']}</h3>
+                        <p className="text-[10px] md:text-[11px] text-slate-600 font-mono truncate">{emp['CNPJ']}</p>
                       </div>
-                      <div className="flex flex-col items-end shrink-0 gap-1.5">
-                        <div className={`px-2 py-1 rounded bg-white/60 text-xs font-bold ${scoreData.color}`} title={scoreData.desc}>
-                          {scoreData.icon} {scoreData.label}
+                      <div className="flex flex-col items-end shrink-0 gap-1 md:gap-1.5">
+                        <div className={`px-1.5 md:px-2 py-0.5 md:py-1 rounded bg-white/60 text-[10px] md:text-xs font-bold ${scoreData.color}`} title={scoreData.desc}>
+                          {scoreData.icon} <span className="hidden xs:inline">{scoreData.label}</span>
                         </div>
-                        {/* Selo de curadoria para os Cards */}
                         {emp.isLookalike && emp.score > 0 && (
-                          <div className="flex items-center text-[9px] font-bold text-emerald-700 bg-emerald-100/80 px-1.5 py-0.5 rounded border border-emerald-200" title={emp.curadoriaReason}>
-                            <Target size={10} className="mr-1"/> Curadoria
+                          <div className="flex items-center text-[8px] md:text-[9px] font-bold text-emerald-700 bg-emerald-100/80 px-1 md:px-1.5 py-0.5 rounded border border-emerald-200" title={emp.curadoriaReason}>
+                            <Target size={10} className="mr-0.5 md:mr-1"/> Curadoria
                           </div>
                         )}
                       </div>
                     </div>
 
-                    <div className="p-4 space-y-2 flex-1 text-sm text-slate-600">
-                      <div className="flex items-start"><User size={14} className="mr-2 text-slate-400 mt-1 shrink-0" /><span className="truncate">{emp['NOME'] || 'Sem contato'}</span></div>
-                      <div className="flex items-center"><Phone size={14} className="mr-2 text-slate-400 shrink-0" /><span>{emp['TELEFONE'] || '-'}</span></div>
-                      <div className="flex items-center" title="Local e Setor"><MapPin size={14} className="mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp['CIDADE']} • {emp['SETOR']?.substring(0, 20)}</span></div>
-                      <div className="flex items-center" title="Número de Funcionários"><Building size={14} className="mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp['NÚMERO DE FUNCIONÁRIOS'] || 'N/I'}</span></div>
+                    <div className="p-3 md:p-4 space-y-2 flex-1 text-xs md:text-sm text-slate-600">
+                      <div className="flex items-start"><User size={14} className="mr-1.5 md:mr-2 text-slate-400 mt-1 shrink-0" /><span className="truncate">{emp['NOME'] || 'Sem contato'}</span></div>
+                      <div className="flex items-center"><Phone size={14} className="mr-1.5 md:mr-2 text-slate-400 shrink-0" /><span>{emp['TELEFONE'] || '-'}</span></div>
+                      <div className="flex items-center" title="Local e Setor"><MapPin size={14} className="mr-1.5 md:mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp['CIDADE']} • {emp['SETOR']?.substring(0, 15)}</span></div>
+                      <div className="flex items-center" title="Número de Funcionários"><Building size={14} className="mr-1.5 md:mr-2 text-slate-400 shrink-0" /><span className="truncate">{emp['NÚMERO DE FUNCIONÁRIOS'] || 'N/I'}</span></div>
                     </div>
 
-                    <div className="p-4 bg-slate-50 border-t border-slate-100 space-y-3">
+                    <div className="p-3 md:p-4 bg-slate-50 border-t border-slate-100 space-y-2 md:space-y-3">
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Status CRM</label>
-                        <select className="w-full border-slate-300 rounded-md p-1.5 text-sm font-semibold bg-white outline-none focus:ring-2 focus:ring-blue-500 border" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
+                        <label className="block text-[10px] md:text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Status CRM</label>
+                        <select className="w-full border-slate-300 rounded-md p-1 md:p-1.5 text-xs md:text-sm font-semibold bg-white outline-none focus:ring-2 focus:ring-blue-500 border" value={crm.status} onChange={(e) => updateCrm(emp.cnpj_key, 'status', e.target.value)}>
                           {STATUS_CRM.map(s => <option key={s} value={s}>{s}</option>)}
                         </select>
                       </div>
                       <div>
-                        <label className="block text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Consultoria Foco</label>
-                        <select className="w-full border-slate-300 rounded-md p-1.5 text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 border" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
+                        <label className="block text-[10px] md:text-[11px] font-semibold text-slate-500 mb-1 uppercase tracking-wider">Consultoria Foco</label>
+                        <select className="w-full border-slate-300 rounded-md p-1 md:p-1.5 text-xs md:text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500 border" value={crm.consultoria} onChange={(e) => updateCrm(emp.cnpj_key, 'consultoria', e.target.value)} disabled={crm.status === 'Não Contactado'}>
                           <option value="">Definir Consultoria...</option>
                           {CONSULTORIAS.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
